@@ -1,0 +1,13 @@
+[Unit]
+Description=Check regularly for Edukasaun OS and Flatpak updates
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=6h
+AccuracySec=1min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=eus-refresh.service
+
+[Install]
+WantedBy=timers.target

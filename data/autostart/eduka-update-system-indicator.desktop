@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Eduka-Update-System Indicator
+Name[tet]=Indikadór Eduka-Update-System
+Name[pt]=Indicador do Eduka-Update-System
+Name[id]=Indikator Eduka-Update-System
+Comment=Show the EUS icon only when updates are available
+Comment[tet]=Hatudu ikone EUS bainhira deit atualizasaun disponivel
+Comment[pt]=Mostrar o icone do EUS somente quando houver atualizacoes
+Comment[id]=Tampilkan ikon EUS hanya ketika pembaruan tersedia
+Exec=/usr/bin/python3 /usr/lib/EUS-ICONS/eus_panel_indicator.py
+TryExec=/usr/bin/python3
+Icon=eduka-update-system
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-LXQt-Need-Tray=true

@@ -1,0 +1,34 @@
+{
+  "version": "0.12",
+  "default_language": "en",
+  "translations": {
+    "en": {
+      "updates_available": "Updates available",
+      "updates_available_count": "{count} updates available",
+      "update_running": "Update in progress",
+      "update_finished": "Update finished",
+      "open_manager": "Open Update Manager"
+    },
+    "tet": {
+      "updates_available": "Atualizasaun disponivel",
+      "updates_available_count": "Atualizasaun {count} disponivel",
+      "update_running": "Atualizasaun lao hela",
+      "update_finished": "Atualizasaun remata ona",
+      "open_manager": "Loke Jestór Atualizasaun"
+    },
+    "pt": {
+      "updates_available": "Atualizações disponíveis",
+      "updates_available_count": "{count} atualizações disponíveis",
+      "update_running": "Atualização em andamento",
+      "update_finished": "Atualização concluída",
+      "open_manager": "Abrir Gestor de Atualizações"
+    },
+    "id": {
+      "updates_available": "Pembaruan tersedia",
+      "updates_available_count": "{count} pembaruan tersedia",
+      "update_running": "Pembaruan sedang berjalan",
+      "update_finished": "Pembaruan selesai",
+      "open_manager": "Buka Pengelola Pembaruan"
+    }
+  }
+}

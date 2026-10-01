@@ -1,0 +1,4 @@
+critical	apt	xserver-common	2.21.1	2.21.2	2400000	Security update for X server components.
+medium	apt	linux-image-amd64	6.12.1	6.12.2	78000000	Kernel stability and hardware fixes.
+normal	apt	adduser	3.134	3.135	180000	User management utility update.
+flatpak	flatpak-user	org.libreoffice.LibreOffice	24.8	25.2	120000000	LibreOffice Flatpak update.

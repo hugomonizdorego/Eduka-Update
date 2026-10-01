@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=EUS Update Notifier
+Name[tet]=Notifikasaun Atualizasaun EUS
+Name[pt]=Notificador de Atualizacoes EUS
+Name[id]=Notifikasi Pembaruan EUS
+Comment=Notify when categorized Edukasaun OS or Flatpak updates are available
+Exec=/usr/local/bin/eduka-update-system --watch
+TryExec=/usr/local/bin/eduka-update-system
+Icon=eduka-update-system
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-LXQt-Need-Tray=false

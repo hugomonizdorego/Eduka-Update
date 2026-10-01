@@ -1,0 +1,15 @@
+# Debian/Edukasaun OS runtime packages.
+python3
+python3-pyqt6
+qt6-qpa-plugins
+qt6-svg-plugins
+qt6-wayland
+libnotify-bin
+policykit-1
+pkexec
+lxqt-policykit
+desktop-file-utils
+hicolor-icon-theme
+needrestart
+flatpak
+

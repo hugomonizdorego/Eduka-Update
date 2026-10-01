@@ -1,0 +1,11 @@
+{
+  "version": "0.12",
+  "size": 48,
+  "default_language": "en",
+  "translation_file": "eus-i18n.json",
+  "idle": "eus-update-idle.png",
+  "available": "eus-update-available.png",
+  "running": "eus-update-running.gif",
+  "running_fallback": "eus-update-running.png",
+  "finished": "eus-update-finished.png"
+}

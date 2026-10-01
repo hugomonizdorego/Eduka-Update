@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Edukasaun OS</vendor>
+  <vendor_url>https://www.edukasaunos.tl/</vendor_url>
+  <action id="tl.edukasaun.eus.manage">
+    <description>Manage updates or restart Edukasaun OS</description>
+    <description xml:lang="tet">Jere atualizasaun ka hahu fali Edukasaun OS</description>
+    <description xml:lang="pt">Gerir atualizacoes ou reiniciar o Edukasaun OS</description>
+    <description xml:lang="id">Kelola pembaruan atau mulai ulang Edukasaun OS</description>
+    <message>Authentication is required to update or restart Edukasaun OS</message>
+    <message xml:lang="tet">Presiza autorizasaun atu atualiza ka hahu fali Edukasaun OS</message>
+    <message xml:lang="pt">E necessaria autenticacao para atualizar ou reiniciar o Edukasaun OS</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk memperbarui atau memulai ulang Edukasaun OS</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/eduka-update-system-root</annotate>
+  </action>
+</policyconfig>

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh and categorize Eduka-Update-System metadata
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/eduka-update-system-root refresh en
+Nice=10
+IOSchedulingClass=idle

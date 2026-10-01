@@ -1,0 +1,24 @@
+[Desktop Entry]
+Type=Application
+Name=Eduka-Update-System
+Name[tet]=Eduka-Update-System
+Name[pt]=Eduka-Update-System
+Name[id]=Eduka-Update-System
+GenericName=Update Manager
+GenericName[tet]=Jestór Atualizasaun
+GenericName[pt]=Gestor de Atualizacoes
+GenericName[id]=Manajer Pembaruan
+Comment=Review and install categorized Edukasaun OS and Flatpak updates
+Comment[tet]=Haree no instala atualizasaun Edukasaun OS no Flatpak tuir kategoria
+Comment[pt]=Rever e instalar atualizacoes categorizadas do Edukasaun OS e Flatpak
+Comment[id]=Periksa dan pasang pembaruan Edukasaun OS dan Flatpak berdasarkan kategori
+Exec=/usr/local/bin/eduka-update-system --ui
+TryExec=/usr/local/bin/eduka-update-system
+Icon=eduka-update-system
+Terminal=false
+DBusActivatable=false
+Categories=System;Settings;
+Keywords=update;upgrade;security;APT;Flatpak;EUS;Edukasaun;
+StartupNotify=true
+StartupWMClass=Eduka-Update-System
+X-LXQt-Need-Tray=false
