@@ -5,14 +5,14 @@
   <vendor>Edukasaun OS</vendor>
   <vendor_url>https://www.edukasaunos.tl/</vendor_url>
   <action id="tl.edukasaun.eus.manage">
-    <description>Manage updates or restart Edukasaun OS</description>
+    <description>Manage updates, kernels, repository keys or restart Edukasaun OS</description>
     <description xml:lang="tet">Jere atualizasaun ka hahu fali Edukasaun OS</description>
     <description xml:lang="pt">Gerir atualizacoes ou reiniciar o Edukasaun OS</description>
-    <description xml:lang="id">Kelola pembaruan atau mulai ulang Edukasaun OS</description>
-    <message>Authentication is required to update or restart Edukasaun OS</message>
+    <description xml:lang="id">Kelola pembaruan, kernel, kunci repositori, atau mulai ulang Edukasaun OS</description>
+    <message>Authentication is required to manage updates, kernels or repository keys, or to restart Edukasaun OS</message>
     <message xml:lang="tet">Presiza autorizasaun atu atualiza ka hahu fali Edukasaun OS</message>
     <message xml:lang="pt">E necessaria autenticacao para atualizar ou reiniciar o Edukasaun OS</message>
-    <message xml:lang="id">Autentikasi diperlukan untuk memperbarui atau memulai ulang Edukasaun OS</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk mengelola pembaruan, kernel, atau kunci repositori, atau memulai ulang Edukasaun OS</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

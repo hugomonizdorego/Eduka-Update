@@ -11,5 +11,6 @@ lxqt-policykit
 desktop-file-utils
 hicolor-icon-theme
 needrestart
+gnupg
 flatpak
 

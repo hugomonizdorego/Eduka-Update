@@ -40,7 +40,7 @@ fi
 target() { printf '%s%s' "$DESTDIR" "$1"; }
 
 if [[ -z "$DESTDIR" ]] && command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now eus-refresh.timer >/dev/null 2>&1 || true
+    systemctl disable --now eus-refresh.timer eus-sources.path >/dev/null 2>&1 || true
 fi
 
 files=(
@@ -49,6 +49,7 @@ files=(
     /usr/local/bin/eus-panel-status
     /usr/local/libexec/eduka-update-system-gui
     /usr/local/libexec/eduka-update-system-root
+    /usr/local/libexec/eduka-update-system-tool
     /usr/lib/EUS-ICONS/eus_panel_indicator.py
     /usr/lib/EUS-ICONS/eus-i18n.json
     /usr/lib/EUS-ICONS/eus-icons.json
@@ -65,6 +66,8 @@ files=(
     /etc/xdg/autostart/eduka-update-system-notifier.desktop
     /etc/systemd/system/eus-refresh.service
     /etc/systemd/system/eus-refresh.timer
+    /etc/systemd/system/eus-sources.path
+    /etc/systemd/system/eus-sources-refresh.service
     /etc/systemd/system/eus-refresh.timer.d/override.conf
 )
 
@@ -77,6 +80,10 @@ if ((PURGE)); then
         /etc/eus/eus.conf
         /etc/eus/interval-hours
         /etc/eus/version
+        /etc/eus/schedule
+        /etc/eus/pause
+        /var/lib/eus/apt-update.log
+        /var/lib/eus/repair-report.json
         /var/lib/eus/updates.tsv
         /var/lib/eus/status
         /var/lib/eus/last-error

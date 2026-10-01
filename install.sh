@@ -73,6 +73,7 @@ install_file 0755 src/launcher/eduka-update-system.sh /usr/local/bin/eduka-updat
 install_file 0755 src/integration/eus-panel-status.py /usr/local/bin/eus-panel-status
 install_file 0755 src/gui/eduka-update-system-gui.py /usr/local/libexec/eduka-update-system-gui
 install_file 0755 src/backend/eduka-update-system-root.sh /usr/local/libexec/eduka-update-system-root
+install_file 0755 src/backend/eduka-update-system-tool.py /usr/local/libexec/eduka-update-system-tool
 
 install_file 0755 src/integration/eus_panel_indicator.py /usr/lib/EUS-ICONS/eus_panel_indicator.py
 for asset in "$PROJECT_DIR"/assets/eus-icons/*; do
@@ -87,6 +88,8 @@ install_file 0644 data/autostart/eduka-update-system-notifier.desktop /etc/xdg/a
 install_file 0644 data/polkit/tl.edukasaun.eus.policy /usr/share/polkit-1/actions/tl.edukasaun.eus.policy
 install_file 0644 data/systemd/eus-refresh.service /etc/systemd/system/eus-refresh.service
 install_file 0644 data/systemd/eus-refresh.timer /etc/systemd/system/eus-refresh.timer
+install_file 0644 data/systemd/eus-sources.path /etc/systemd/system/eus-sources.path
+install_file 0644 data/systemd/eus-sources-refresh.service /etc/systemd/system/eus-sources-refresh.service
 
 install_if_missing 0644 config/eus.conf /etc/eus/eus.conf
 install_if_missing 0644 config/interval-hours /etc/eus/interval-hours
@@ -104,6 +107,7 @@ PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/eus-install-pycache.$$" \
     python3 -m py_compile \
     "$(target /usr/local/libexec/eduka-update-system-gui)" \
     "$(target /usr/local/bin/eus-panel-status)" \
+    "$(target /usr/local/libexec/eduka-update-system-tool)" \
     "$(target /usr/lib/EUS-ICONS/eus_panel_indicator.py)"
 rm -rf -- "${TMPDIR:-/tmp}/eus-install-pycache.$$"
 
@@ -114,7 +118,8 @@ if [[ -z "$DESTDIR" ]]; then
         gtk-update-icon-cache -f -q /usr/share/icons/hicolor >/dev/null 2>&1 || true
     if ((ENABLE_SERVICES)) && command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload
-        systemctl enable --now eus-refresh.timer
+        # In a chroot such as Cubic, systemctl enables the units and skips starting them.
+        systemctl enable --now eus-refresh.timer eus-sources.path
     fi
 fi
 

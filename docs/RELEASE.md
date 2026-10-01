@@ -1,13 +1,14 @@
 # Release procedure
 
 1. Update `VERSION`, the source constants, icon manifest, and changelog.
-2. Keep the visible version simple (for example `0.12`); do not add a build
+2. Keep the visible version simple (for example `0.13`); do not add a build
    suffix.
-3. Run `make check`.
-4. Build an archive with `make source-archive`.
-5. Test installation on Edukasaun OS in both X11 and Wayland LXQt sessions.
-6. Verify APT-only, Flatpak-only, mixed, failed, and restart-required paths.
-7. Tag the commit and publish the generated archive.
+3. Regenerate the Cubic installer (`make cubic-installer`) and run `make check`.
+4. Build the package with `make deb` and copy it to `releases/`.
+5. Build an archive with `make source-archive`.
+6. Test installation on Edukasaun OS in both X11 and Wayland LXQt sessions.
+7. Verify APT-only, Flatpak-only, mixed, failed, and restart-required paths.
+8. Tag the commit and publish the generated archive.
 
 Example first publication:
 

@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+
+UNITS="eus-refresh.service eus-refresh.timer eus-sources.path eus-sources-refresh.service"
+
+if [ "$1" = configure ]; then
+    install -d -m 0755 /etc/eus /var/lib/eus /var/log/eus
+    [ -e /etc/eus/interval-hours ] || printf '6\n' >/etc/eus/interval-hours
+    chmod 0644 /etc/eus/interval-hours
+
+    # A previous `sudo ./install.sh` placed unit copies in /etc, which would
+    # shadow the packaged ones. Remove only EUS's own copies.
+    for unit in $UNITS; do
+        if [ -f "/etc/systemd/system/$unit" ] && \
+           grep -q 'eduka-update-system-root\|Eduka-Update-System\|eus-refresh.service\|eus-sources-refresh.service' \
+               "/etc/systemd/system/$unit"; then
+            rm -f "/etc/systemd/system/$unit"
+        fi
+    done
+    for link in /etc/systemd/system/timers.target.wants/eus-refresh.timer \
+                /etc/systemd/system/paths.target.wants/eus-sources.path; do
+        [ -L "$link" ] && [ ! -e "$link" ] && rm -f "$link"
+    done
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    # Works in a chroot (Cubic) too: enabling only creates symlinks.
+    systemctl enable eus-refresh.timer eus-sources.path >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then
+        systemctl restart eus-refresh.timer eus-sources.path >/dev/null 2>&1 || true
+    fi
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -q /usr/share/icons/hicolor >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

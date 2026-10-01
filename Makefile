@@ -2,7 +2,7 @@ SHELL := /bin/bash
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 DIST_DIR := dist
 
-.PHONY: all check install uninstall install-no-deps source-archive clean
+.PHONY: all check install uninstall install-no-deps source-archive deb cubic-installer clean
 
 all: check
 
@@ -23,6 +23,12 @@ source-archive: check
 	tar --exclude='./.git' --exclude='./$(DIST_DIR)' \
 		-czf $(DIST_DIR)/eduka-update-system-$(VERSION)-source.tar.gz \
 		--transform='s,^\.,eduka-update-system-$(VERSION),' .
+
+deb:
+	./packaging/build-deb.sh $(DIST_DIR)
+
+cubic-installer:
+	./tools/build-cubic-installer.sh
 
 clean:
 	rm -rf -- $(DIST_DIR)

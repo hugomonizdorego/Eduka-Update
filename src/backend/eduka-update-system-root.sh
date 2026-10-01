@@ -1,5 +1,6 @@
 #!/bin/bash
-# Privileged helper for Eduka-Update-System 0.12. Do not launch directly.
+# Privileged helper for Eduka-Update-System 0.13. Do not launch directly.
+# It is the only program PolicyKit allows EUS to run as root.
 
 set -u
 umask 022
@@ -15,6 +16,12 @@ STATUS_FILE="$STATE_DIR/status"
 ERROR_FILE="$STATE_DIR/last-error"
 INTERVAL_FILE='/etc/eus/interval-hours'
 RESTART_FILE="$STATE_DIR/restart-required"
+APT_UPDATE_LOG="$STATE_DIR/apt-update.log"
+SCHEDULE_FILE='/etc/eus/schedule'
+PAUSE_FILE='/etc/eus/pause'
+TIMER_OVERRIDE='/etc/systemd/system/eus-refresh.timer.d/override.conf'
+TOOL='/usr/local/libexec/eduka-update-system-tool'
+PYTHON='/usr/bin/python3'
 OS_RELEASE_PACKAGE='edukasaun-release'
 
 ACTION="${1:-}"
@@ -36,6 +43,15 @@ case "$LOCALE_CODE" in
         P_CLEAR_HISTORY='Hamoos istoria atualizasaun...'
         P_REBOOT='Hahu fali sistema...'
         P_DONE='Remata.'
+        P_KEYS="Hadi'a xave GPG no keyring..."
+        P_DUPLICATES="Hadi'a repositoriu duplikadu..."
+        P_ADD_KEY="Aumenta xave GPG..."
+        P_KERNEL_INSTALL="Instala kernel..."
+        P_KERNEL_REMOVE="Hasai kernel..."
+        P_PAUSE="Rai pauza atualizasaun..."
+        P_PAUSED="Verifikasaun automatiku pauza hela."
+        P_KEY_HINT="Iha problema xave GPG ka repositoriu. Loke menu Key Fix atu hadi'a."
+        P_NETWORK="Repositoriu balun la bele asesu; lista atualizasaun bele la kompletu."
         ;;
     pt)
         P_LOCK='Outro processo do EUS ja esta em execucao.'
@@ -50,6 +66,15 @@ case "$LOCALE_CODE" in
         P_CLEAR_HISTORY='Limpando o historico de atualizacoes...'
         P_REBOOT='Reiniciando o sistema...'
         P_DONE='Concluido.'
+        P_KEYS="Reparando chaves GPG e keyrings..."
+        P_DUPLICATES="Corrigindo repositorios duplicados..."
+        P_ADD_KEY="Adicionando a chave GPG..."
+        P_KERNEL_INSTALL="Instalando o kernel..."
+        P_KERNEL_REMOVE="Removendo o kernel..."
+        P_PAUSE="Salvando a pausa das atualizacoes..."
+        P_PAUSED="As verificacoes automaticas estao em pausa."
+        P_KEY_HINT="Ha problemas de chaves GPG ou de repositorios. Abra o menu Key Fix para corrigi-los."
+        P_NETWORK="Alguns repositorios nao responderam; a lista de atualizacoes pode estar incompleta."
         ;;
     id)
         P_LOCK='Proses EUS lain sedang berjalan.'
@@ -64,6 +89,15 @@ case "$LOCALE_CODE" in
         P_CLEAR_HISTORY='Membersihkan riwayat pembaruan...'
         P_REBOOT='Memulai ulang sistem...'
         P_DONE='Selesai.'
+        P_KEYS="Memperbaiki kunci GPG dan keyring..."
+        P_DUPLICATES="Memperbaiki repositori duplikat..."
+        P_ADD_KEY="Menambahkan kunci GPG..."
+        P_KERNEL_INSTALL="Memasang kernel..."
+        P_KERNEL_REMOVE="Menghapus kernel..."
+        P_PAUSE="Menyimpan jeda pembaruan..."
+        P_PAUSED="Pemeriksaan otomatis sedang dijeda."
+        P_KEY_HINT="Ada masalah kunci GPG atau repositori. Buka menu Key Fix untuk memperbaikinya."
+        P_NETWORK="Beberapa repositori tidak dapat dihubungi; daftar pembaruan mungkin belum lengkap."
         ;;
     *)
         P_LOCK='Another EUS process is already running.'
@@ -78,6 +112,15 @@ case "$LOCALE_CODE" in
         P_CLEAR_HISTORY='Clearing update history...'
         P_REBOOT='Restarting the system...'
         P_DONE='Complete.'
+        P_KEYS="Repairing GPG keys and keyrings..."
+        P_DUPLICATES="Fixing duplicate repositories..."
+        P_ADD_KEY="Adding the GPG key..."
+        P_KERNEL_INSTALL="Installing the kernel..."
+        P_KERNEL_REMOVE="Removing the kernel..."
+        P_PAUSE="Saving the update pause..."
+        P_PAUSED="Automatic update checks are paused."
+        P_KEY_HINT="Repository or GPG key problems were found. Open the Key Fix menu to repair them."
+        P_NETWORK="Some repositories could not be reached; the update list may be incomplete."
         ;;
 esac
 
@@ -238,39 +281,71 @@ append_system_flatpaks() {
 }
 
 calculate_updates() {
-    local simulation tsv_tmp count fingerprint release_upgrade download_bytes
-    local package line installed candidate metadata size description category policy priority section
+    local simulation metadata_file tsv_tmp count fingerprint release_upgrade download_bytes
+    local line package installed candidate archives size description category priority section key
     local installed_release candidate_release
+    local -a packages=()
+    declare -A meta_size=() meta_priority=() meta_section=() meta_description=()
+    local inst_re='^Inst ([^ ]+)( \[([^]]*)\])? \(([^ ]+) (.*)\)'
 
     simulation="$(mktemp)"
+    metadata_file="$(mktemp)"
     tsv_tmp="$(mktemp "$STATE_DIR/updates.XXXXXX")"
 
     if ! LC_ALL=C apt-get -s -o Debug::NoLocking=1 full-upgrade >"$simulation" 2>>"$LOG_FILE"; then
-        rm -f "$simulation" "$tsv_tmp"
+        rm -f "$simulation" "$metadata_file" "$tsv_tmp"
         write_state error 0 none 0 0
         fail 'APT could not calculate the available updates. See /var/log/eus/eus.log.'
     fi
 
-    while IFS= read -r package; do
-        [[ -n "$package" ]] || continue
-        line="$(awk -v wanted="$package" '$1 == "Inst" && $2 == wanted {print; exit}' "$simulation")"
-        installed="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null || printf '-')"
-        candidate="$(LC_ALL=C apt-cache policy "$package" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
-        [[ -n "$candidate" && "$candidate" != '(none)' ]] || candidate='-'
-        metadata="$(LC_ALL=C apt-cache --no-all-versions show "$package" 2>/dev/null || true)"
-        size="$(awk -F': ' '/^Size: / {print $2; exit}' <<<"$metadata")"
-        [[ "$size" =~ ^[0-9]+$ ]] || size=0
-        description="$(awk -F': ' '/^Description(-[A-Za-z_@.-]+)?: / {print $2; exit}' <<<"$metadata")"
-        priority="$(awk -F': ' '/^Priority: / {print $2; exit}' <<<"$metadata")"
-        section="$(awk -F': ' '/^Section: / {print $2; exit}' <<<"$metadata")"
-        [[ -n "$description" ]] || description='System package update'
+    # One batched apt-cache call instead of several per package: with a
+    # hundred pending updates the old per-package loop took minutes.
+    mapfile -t packages < <(awk '/^Inst / {print $2}' "$simulation" | sort -u)
+    if ((${#packages[@]})); then
+        LC_ALL=C apt-cache show --no-all-versions "${packages[@]}" 2>/dev/null | awk '
+            function flush() {
+                if (pkg != "" && !(pkg in seen)) {
+                    seen[pkg] = 1
+                    gsub(/\t/, " ", desc)
+                    printf "%s\t%s\t%s\t%s\t%s\n", pkg, size + 0, prio, sect, desc
+                }
+                pkg = size = prio = sect = desc = ""
+            }
+            /^Package: / { flush(); pkg = substr($0, 10) }
+            /^Size: / { size = substr($0, 7) }
+            /^Priority: / { prio = substr($0, 11) }
+            /^Section: / { sect = substr($0, 10) }
+            /^Description(-[A-Za-z_@.-]+)?: / { if (desc == "") { sub(/^[^:]*: /, ""); desc = $0 } }
+            END { flush() }' >"$metadata_file"
+        while IFS=$'\t' read -r key size priority section description; do
+            meta_size["$key"]="$size"
+            meta_priority["$key"]="$priority"
+            meta_section["$key"]="$section"
+            meta_description["$key"]="$description"
+        done <"$metadata_file"
+    fi
 
-        policy="$(LC_ALL=C apt-cache policy "$package" 2>/dev/null || true)"
-        if [[ "$package" == "$OS_RELEASE_PACKAGE" ]] || \
-           grep -qiE 'security|Debian-Security' <<<"$line" || \
-           { [[ "$candidate" != '-' ]] && grep -A6 -F "$candidate" <<<"$policy" | grep -qiE 'security|Debian-Security'; }; then
+    declare -A done_packages=()
+    while IFS= read -r line; do
+        [[ "$line" =~ $inst_re ]] || continue
+        package="${BASH_REMATCH[1]}"
+        installed="${BASH_REMATCH[3]:--}"
+        candidate="${BASH_REMATCH[4]:--}"
+        archives="${BASH_REMATCH[5]}"
+        [[ -z "${done_packages[$package]:-}" ]] || continue
+        done_packages[$package]=1
+        key="${package%%:*}"
+        size="${meta_size[$key]:-0}"
+        [[ "$size" =~ ^[0-9]+$ ]] || size=0
+        priority="${meta_priority[$key]:-}"
+        section="${meta_section[$key]:-}"
+        description="${meta_description[$key]:-System package update}"
+
+        # APT lists every archive that carries the candidate version, so a
+        # security fix also published in -updates is still recognised.
+        if [[ "$key" == "$OS_RELEASE_PACKAGE" || "${archives,,}" == *security* ]]; then
             category='critical'
-        elif is_medium_package "$package" || [[ "$priority" == 'required' || "$priority" == 'important' || "$section" == 'kernel' ]]; then
+        elif is_medium_package "$key" || [[ "$priority" == 'required' || "$priority" == 'important' || "$section" == 'kernel' ]]; then
             category='medium'
         else
             category='normal'
@@ -281,7 +356,8 @@ calculate_updates() {
         description="$(sanitize_field "$description")"
         printf '%s\tapt\t%s\t%s\t%s\t%s\t%s\n' \
             "$category" "$package" "$installed" "$candidate" "$size" "$description" >>"$tsv_tmp"
-    done < <(awk '/^Inst / {print $2}' "$simulation" | sort -u)
+    done <"$simulation"
+    rm -f "$metadata_file"
 
     append_system_flatpaks "$tsv_tmp"
     count="$(awk 'END {print NR+0}' "$tsv_tmp")"
@@ -338,17 +414,43 @@ apt_progress_stream() {
 }
 
 apt_update_command() {
-    apt-get -o Acquire::Retries=3 -o APT::Status-Fd=3 update \
-        >>"$LOG_FILE" 2>&1 3> >(apt_progress_stream 8 55 63 1)
+    # Keep the last `apt-get update` output separately: Key Fix reads it to
+    # find missing/expired signing keys and duplicate repositories.
+    local rc tmp
+    tmp="$(mktemp "$STATE_DIR/apt-update.XXXXXX")"
+    # fd 4 keeps the caller's stdout (the progress protocol); without it the
+    # progress stream inherited apt's redirection and never reached the GUI.
+    { apt-get -o Acquire::Retries=3 -o APT::Status-Fd=3 update \
+        >"$tmp" 2>&1 3> >(apt_progress_stream 8 55 63 1 >&4); } 4>&1
+    rc=$?
+    cat "$tmp" >>"$LOG_FILE"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$APT_UPDATE_LOG"
+    return "$rc"
+}
+
+apt_has_key_problems() {
+    [[ -r "$APT_UPDATE_LOG" && -x "$PYTHON" && -r "$TOOL" ]] || return 1
+    "$PYTHON" -I "$TOOL" apt-problems --check >/dev/null 2>&1
+}
+
+apt_update_or_fail() {
+    # One unreachable or broken repository must not hide every other update:
+    # APT keeps the last good lists, so continue with them and warn instead.
+    apt_update_command && return 0
+    log_header 'apt-get update reported errors; continuing with the available package lists'
+    if apt_has_key_problems; then
+        progress 62 "$P_KEY_HINT"
+    else
+        progress 62 "$P_NETWORK"
+    fi
+    return 0
 }
 
 refresh_lists() {
     progress 8 "$P_REFRESH"
     log_header 'APT and Flatpak metadata refresh with category scan'
-    if ! apt_update_command; then
-        write_state error 0 none 0 0
-        fail 'APT package-list refresh failed. Check the network and repository configuration.'
-    fi
+    apt_update_or_fail
     progress 68 "$P_CALCULATE"
     calculate_updates
     progress 100 "$P_DONE"
@@ -360,14 +462,13 @@ apt_upgrade_command() {
         -o APT::Status-Fd=3 \
         -o Dpkg::Options::='--force-confdef' \
         -o Dpkg::Options::='--force-confold' \
-        "$@" >>"$LOG_FILE" 2>&1 3> >(apt_progress_stream 26 40 66 26)
+        "$@" 4>&1 >>"$LOG_FILE" 2>&1 3> >(apt_progress_stream 26 40 66 26 >&4)
 }
 
 upgrade_all_apt() {
     progress 5 "$P_REFRESH"
     log_header 'Full APT upgrade selected in EUS'
-    apt_update_command || \
-        fail 'APT package-list refresh failed. Check the network and repository configuration.'
+    apt_update_or_fail
     progress 26 "$P_UPGRADE"
     apt_upgrade_command full-upgrade -y || \
         fail 'The system upgrade did not finish successfully. See /var/log/eus/eus.log.'
@@ -385,8 +486,7 @@ install_selected_apt() {
     ((${#EXTRA_ARGS[@]} <= 500)) || fail 'Too many package arguments.'
     progress 5 "$P_REFRESH"
     log_header "Selected APT upgrade (${#EXTRA_ARGS[@]} requested)"
-    apt_update_command || \
-        fail 'APT package-list refresh failed. Check the network and repository configuration.'
+    apt_update_or_fail
     progress 18 "$P_CALCULATE"
     calculate_updates
 
@@ -401,7 +501,9 @@ install_selected_apt() {
     done
 
     progress 34 "$P_SELECTED"
-    apt_upgrade_command install -y "${selected[@]}" || \
+    # --only-upgrade keeps APT's automatic/manual marks unchanged, so
+    # dependencies upgraded here can still be autoremoved later.
+    apt_upgrade_command install --only-upgrade -y "${selected[@]}" || \
         fail 'One or more selected updates could not be installed. See /var/log/eus/eus.log.'
     progress 92 "$P_CALCULATE"
     calculate_updates
@@ -434,22 +536,243 @@ install_system_flatpaks() {
     progress 100 "$P_DONE"
 }
 
-set_interval() {
-    local hours="${EXTRA_ARGS[0]:-}"
-    case "$hours" in 1|3|6|12|24) ;; *) fail 'Invalid update-check interval.' ;; esac
-    progress 25 "$P_SETTINGS"
-    install -d -m 0755 /etc/systemd/system/eus-refresh.timer.d
-    {
-        printf '[Timer]\n'
-        printf 'OnUnitActiveSec=\n'
-        printf 'OnUnitActiveSec=%sh\n' "$hours"
-    } >/etc/systemd/system/eus-refresh.timer.d/override.conf
-    printf '%s\n' "$hours" >"$INTERVAL_FILE"
-    chmod 0644 "$INTERVAL_FILE" /etc/systemd/system/eus-refresh.timer.d/override.conf
+reload_timer() {
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload >>"$LOG_FILE" 2>&1 || true
         systemctl restart eus-refresh.timer >>"$LOG_FILE" 2>&1 || true
     fi
+}
+
+write_schedule() {
+    local mode="$1" hours="$2" daily="$3"
+    install -d -m 0755 "${TIMER_OVERRIDE%/*}"
+    if [[ "$mode" == daily ]]; then
+        {
+            printf '[Timer]\n'
+            printf 'OnUnitActiveSec=\n'
+            printf 'OnCalendar=\n'
+            printf 'OnCalendar=*-*-* %s:00\n' "$daily"
+        } >"$TIMER_OVERRIDE"
+    else
+        {
+            printf '[Timer]\n'
+            printf 'OnCalendar=\n'
+            printf 'OnUnitActiveSec=\n'
+            printf 'OnUnitActiveSec=%sh\n' "$hours"
+        } >"$TIMER_OVERRIDE"
+        printf '%s\n' "$hours" >"$INTERVAL_FILE"
+        chmod 0644 "$INTERVAL_FILE"
+    fi
+    {
+        printf "SCHEDULE_MODE='%s'\n" "$mode"
+        printf "INTERVAL_HOURS='%s'\n" "$hours"
+        printf "DAILY_TIME='%s'\n" "$daily"
+    } >"$SCHEDULE_FILE"
+    chmod 0644 "$SCHEDULE_FILE" "$TIMER_OVERRIDE"
+    reload_timer
+}
+
+current_schedule() {
+    SCHEDULE_MODE='interval'; INTERVAL_HOURS=6; DAILY_TIME='09:00'
+    [[ -r "$INTERVAL_FILE" ]] && INTERVAL_HOURS="$(tr -dc '0-9' <"$INTERVAL_FILE")"
+    if [[ -r "$SCHEDULE_FILE" ]]; then
+        local key value
+        while IFS='=' read -r key value; do
+            value="${value//\'/}"
+            case "$key" in
+                SCHEDULE_MODE) [[ "$value" == interval || "$value" == daily ]] && SCHEDULE_MODE="$value" ;;
+                INTERVAL_HOURS) [[ "$value" =~ ^[0-9]+$ ]] && INTERVAL_HOURS="$value" ;;
+                DAILY_TIME) [[ "$value" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && DAILY_TIME="$value" ;;
+            esac
+        done <"$SCHEDULE_FILE"
+    fi
+    [[ "$INTERVAL_HOURS" =~ ^(1|3|6|12|24|48|168)$ ]] || INTERVAL_HOURS=6
+}
+
+set_interval() {
+    local hours="${EXTRA_ARGS[0]:-}"
+    case "$hours" in 1|3|6|12|24|48|168) ;; *) fail 'Invalid update-check interval.' ;; esac
+    progress 25 "$P_SETTINGS"
+    current_schedule
+    write_schedule interval "$hours" "$DAILY_TIME"
+    progress 100 "$P_DONE"
+}
+
+set_schedule() {
+    local mode="${EXTRA_ARGS[0]:-}" value="${EXTRA_ARGS[1]:-}"
+    progress 25 "$P_SETTINGS"
+    current_schedule
+    case "$mode" in
+        interval)
+            [[ "$value" =~ ^(1|3|6|12|24|48|168)$ ]] || fail 'Invalid update-check interval.'
+            write_schedule interval "$value" "$DAILY_TIME"
+            ;;
+        daily)
+            [[ "$value" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || fail 'Invalid daily check time.'
+            write_schedule daily "$INTERVAL_HOURS" "$value"
+            ;;
+        *) fail 'Invalid update schedule.' ;;
+    esac
+    progress 100 "$P_DONE"
+}
+
+pause_updates() {
+    local days="${EXTRA_ARGS[0]:-}" now until
+    [[ "$days" =~ ^[0-9]{1,3}$ ]] && ((days <= 365)) || fail 'Invalid pause duration.'
+    progress 30 "$P_PAUSE"
+    if ((days == 0)); then
+        rm -f -- "$PAUSE_FILE"
+        log_header 'Automatic update checks resumed'
+    else
+        now="$(date +%s)"
+        until=$((now + days * 86400))
+        {
+            printf 'PAUSED_AT=%s\n' "$now"
+            printf 'PAUSED_UNTIL=%s\n' "$until"
+            printf 'PAUSE_DAYS=%s\n' "$days"
+        } >"$PAUSE_FILE"
+        chmod 0644 "$PAUSE_FILE"
+        log_header "Automatic update checks paused for $days days"
+    fi
+    progress 100 "$P_DONE"
+}
+
+updates_paused() {
+    local key value until=0
+    [[ -r "$PAUSE_FILE" ]] || return 1
+    while IFS='=' read -r key value; do
+        [[ "$key" == PAUSED_UNTIL && "$value" =~ ^[0-9]+$ ]] && until="$value"
+    done <"$PAUSE_FILE"
+    if ((until > $(date +%s))); then
+        return 0
+    fi
+    rm -f -- "$PAUSE_FILE"
+    log_header 'Update pause expired; automatic checks resumed'
+    return 1
+}
+
+auto_refresh() {
+    if updates_paused; then
+        log_header 'Scheduled check skipped because updates are paused'
+        progress 100 "$P_PAUSED"
+        return 0
+    fi
+    refresh_lists
+}
+
+run_tool() {
+    # Run the Python maintenance helper; its stdout is the progress protocol.
+    local errors rc message
+    [[ -x "$PYTHON" && -r "$TOOL" ]] || fail 'The EUS maintenance helper is missing.'
+    errors="$(mktemp)"
+    "$PYTHON" -I "$TOOL" --lang "$LOCALE_CODE" "$@" 2>"$errors" | tee -a "$LOG_FILE"
+    rc="${PIPESTATUS[0]}"
+    if ((rc != 0)); then
+        message="$(tail -n 3 "$errors" | tr '\n' ' ')"
+        cat "$errors" >>"$LOG_FILE"
+        rm -f -- "$errors"
+        fail "${message:-The maintenance helper failed. See /var/log/eus/eus.log.}"
+    fi
+    cat "$errors" >>"$LOG_FILE"
+    rm -f -- "$errors"
+}
+
+refresh_after_repair() {
+    # Repository changes alter the update set; rebuild it, but a remaining
+    # repository error must not hide the successful repair itself.
+    apt_update_command || true
+    calculate_updates
+}
+
+fix_keys() {
+    log_header 'GPG key and keyring repair requested'
+    progress 2 "$P_KEYS"
+    run_tool fix-keys
+    calculate_updates
+}
+
+fix_duplicates() {
+    log_header 'Duplicate repository repair requested'
+    progress 5 "$P_DUPLICATES"
+    run_tool fix-duplicates
+    progress 70 "$P_REFRESH"
+    refresh_after_repair
+    progress 100 "$P_DONE"
+}
+
+add_key() {
+    local -a args=()
+    local index flag value
+    ((${#EXTRA_ARGS[@]} % 2 == 0 && ${#EXTRA_ARGS[@]} <= 20)) || fail 'Invalid Add Key arguments.'
+    for ((index = 0; index < ${#EXTRA_ARGS[@]}; index += 2)); do
+        flag="${EXTRA_ARGS[index]}"
+        value="${EXTRA_ARGS[index + 1]}"
+        case "$flag" in
+            --name|--file|--url|--keyserver|--repo-uri|--suite|--components|--arch) ;;
+            --with-source) [[ "$value" == yes ]] || fail 'Invalid Add Key arguments.'; args+=(--with-source); continue ;;
+            *) fail "Invalid Add Key option: $flag" ;;
+        esac
+        [[ "$value" != -* && "$value" != *$'\n'* && ${#value} -le 1024 ]] || fail 'Invalid Add Key value.'
+        args+=("$flag" "$value")
+    done
+    log_header 'Manual GPG key installation requested'
+    progress 3 "$P_ADD_KEY"
+    run_tool add-key "${args[@]}"
+    progress 70 "$P_REFRESH"
+    refresh_after_repair
+    progress 100 "$P_DONE"
+}
+
+kernel_install() {
+    local plan errors
+    local -a tool_args=() packages=()
+    for value in "${EXTRA_ARGS[@]}"; do
+        if [[ "$value" == --headers ]]; then
+            tool_args+=(--headers)
+        else
+            [[ "$value" =~ ^linux-image-[a-z0-9][a-z0-9.+~-]*$ ]] || fail "Invalid kernel package: $value"
+            tool_args+=("$value")
+        fi
+    done
+    log_header "Kernel installation requested: ${EXTRA_ARGS[*]}"
+    progress 4 "$P_REFRESH"
+    apt_update_or_fail
+    progress 20 "$P_KERNEL_INSTALL"
+    errors="$(mktemp)"
+    plan="$("$PYTHON" -I "$TOOL" kernel-plan install "${tool_args[@]}" 2>"$errors")" || {
+        local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
+        fail "${message:-The kernel request was refused.}"
+    }
+    rm -f -- "$errors"
+    mapfile -t packages <<<"$plan"
+    apt_upgrade_command install -y "${packages[@]}" || \
+        fail 'The kernel could not be installed. See /var/log/eus/eus.log.'
+    progress 92 "$P_CALCULATE"
+    calculate_updates
+    progress 100 "$P_DONE"
+}
+
+kernel_remove() {
+    local plan errors value
+    local -a packages=()
+    ((${#EXTRA_ARGS[@]} > 0 && ${#EXTRA_ARGS[@]} <= 40)) || fail 'No kernel was selected.'
+    for value in "${EXTRA_ARGS[@]}"; do
+        [[ "$value" =~ ^[0-9][a-z0-9.+~-]*$ ]] || fail "Invalid kernel release: $value"
+        [[ "$value" != "$(uname -r)" ]] || fail 'The running kernel cannot be removed.'
+    done
+    log_header "Kernel removal requested: ${EXTRA_ARGS[*]}"
+    progress 10 "$P_KERNEL_REMOVE"
+    errors="$(mktemp)"
+    plan="$("$PYTHON" -I "$TOOL" kernel-plan remove "${EXTRA_ARGS[@]}" 2>"$errors")" || {
+        local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
+        fail "${message:-The kernel removal was refused.}"
+    }
+    rm -f -- "$errors"
+    mapfile -t packages <<<"$plan"
+    apt_upgrade_command purge -y "${packages[@]}" || \
+        fail 'The kernel could not be removed. See /var/log/eus/eus.log.'
+    progress 92 "$P_CALCULATE"
+    calculate_updates
     progress 100 "$P_DONE"
 }
 
@@ -479,7 +802,9 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 case "$ACTION" in
-    refresh|upgrade-apt|install-apt|install-flatpak-system|set-interval|clear-history|reboot) ;;
+    refresh|auto-refresh|sources-refresh|upgrade-apt|install-apt|install-flatpak-system) ;;
+    set-interval|set-schedule|pause|clear-history|reboot) ;;
+    fix-keys|fix-duplicates|add-key|kernel-install|kernel-remove) ;;
     *) echo 'Invalid EUS privileged action.' >&2; exit 64 ;;
 esac
 
@@ -488,10 +813,22 @@ install -d -m 0755 "$STATE_DIR" "$LOG_DIR" /run/lock
 touch "$LOG_FILE"
 chmod 0644 "$LOG_FILE"
 exec 9>"$LOCK_FILE"
-flock -n 9 || fail "$P_LOCK"
+case "$ACTION" in
+    # Background refreshes wait for an interactive operation to finish.
+    auto-refresh|sources-refresh) flock -w 1800 9 || { log_header "$P_LOCK"; exit 0; } ;;
+    *) flock -n 9 || fail "$P_LOCK" ;;
+esac
 
 case "$ACTION" in
-    refresh) refresh_lists ;;
+    refresh|sources-refresh) refresh_lists ;;
+    auto-refresh) auto_refresh ;;
+    set-schedule) set_schedule ;;
+    pause) pause_updates ;;
+    fix-keys) fix_keys ;;
+    fix-duplicates) fix_duplicates ;;
+    add-key) add_key ;;
+    kernel-install) kernel_install ;;
+    kernel-remove) kernel_remove ;;
     upgrade-apt) upgrade_all_apt ;;
     install-apt) install_selected_apt ;;
     install-flatpak-system) install_system_flatpaks ;;

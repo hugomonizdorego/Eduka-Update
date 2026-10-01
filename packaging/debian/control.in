@@ -1,0 +1,19 @@
+Package: eduka-update-system
+Version: @VERSION@
+Architecture: all
+Maintainer: @MAINTAINER@
+Installed-Size: @INSTALLED_SIZE@
+Section: admin
+Priority: optional
+Depends: python3 (>= 3.9), python3-pyqt6, qt6-qpa-plugins, libnotify-bin, pkexec | policykit-1, gnupg, apt, systemd | systemd-sysv
+Recommends: qt6-wayland, qt6-svg-plugins, lxqt-policykit | polkit-kde-agent-1 | mate-polkit | policykit-1-gnome, needrestart, flatpak, desktop-file-utils, hicolor-icon-theme
+Homepage: https://www.edukasaunos.tl/
+Description: graphical update, kernel and repository-key manager for Edukasaun OS
+ Eduka-Update-System (EUS) presents APT and Flatpak updates grouped by risk,
+ installs them through PolicyKit, and integrates with the Eduka-Panel.
+ .
+ It also installs and removes kernels (old kernels are marked after a
+ restart and can be removed safely), repairs missing or expired APT GPG
+ keys and damaged keyrings, adds GPG keys and repositories manually, fixes
+ duplicate repository entries, refreshes automatically when a repository is
+ added in a terminal, and lets the user schedule or pause update checks.

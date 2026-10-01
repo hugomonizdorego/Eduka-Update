@@ -5,13 +5,15 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.12'
+VERSION='0.13'
 GUI='/usr/local/libexec/eduka-update-system-gui'
 PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
 STATE_FILE='/var/lib/eus/status'
 RESTART_FILE='/var/lib/eus/restart-required'
 TSV_FILE='/var/lib/eus/updates.tsv'
+PAUSE_FILE='/etc/eus/pause'
+TOOL='/usr/local/libexec/eduka-update-system-tool'
 CONFIG_FILE='/etc/eus/eus.conf'
 VERSION_FILE='/etc/eus/version'
 CHECK_INTERVAL_SECONDS=60
@@ -48,6 +50,8 @@ load_messages() {
             RESTART_TITLE='Presiza hahu fali sistema'
             RESTART_BODY='Atualizasaun importante instala ona. Rai servisu hotu no hahu fali sistema atu aplika mudansa.'
             RESTART_NOW='Hahu Fali Agora'
+            OLD_KERNEL_BODY='Kernel foun la'"'"'o hela. Kernel tuan %s bele hasai ho seguru iha EUS → Kernel.'
+            OPEN_KERNEL='Jere Kernel'
             GUI_ERROR='EUS la bele loke. Haree log iha ~/.local/state/eus/gui-launch.log.'
             ;;
         pt)
@@ -61,6 +65,8 @@ load_messages() {
             RESTART_TITLE='E necessario reiniciar o sistema'
             RESTART_BODY='Foram instaladas atualizacoes importantes. Salve o trabalho e reinicie para aplicar as alteracoes.'
             RESTART_NOW='Reiniciar agora'
+            OLD_KERNEL_BODY='O kernel novo esta em uso. %s kernel(s) antigo(s) pode(m) ser removido(s) com seguranca em EUS → Kernel.'
+            OPEN_KERNEL='Gerir Kernels'
             GUI_ERROR='Nao foi possivel abrir o EUS. Consulte ~/.local/state/eus/gui-launch.log.'
             ;;
         id)
@@ -74,6 +80,8 @@ load_messages() {
             RESTART_TITLE='Sistem perlu dimulai ulang'
             RESTART_BODY='Pembaruan penting telah dipasang. Simpan pekerjaan lalu mulai ulang untuk menerapkan perubahan.'
             RESTART_NOW='Mulai Ulang Sekarang'
+            OLD_KERNEL_BODY='Kernel baru sudah dipakai. %s kernel lama dapat dihapus dengan aman di EUS → Kernel.'
+            OPEN_KERNEL='Kelola Kernel'
             GUI_ERROR='EUS tidak dapat dibuka. Periksa ~/.local/state/eus/gui-launch.log.'
             ;;
         *)
@@ -87,6 +95,8 @@ load_messages() {
             RESTART_TITLE='System restart required'
             RESTART_BODY='Important updates were installed. Save your work and restart to apply the changes.'
             RESTART_NOW='Restart Now'
+            OLD_KERNEL_BODY='The new kernel is in use. %s old kernel(s) can be removed safely in EUS → Kernel.'
+            OPEN_KERNEL='Manage Kernels'
             GUI_ERROR='EUS could not be opened. Check ~/.local/state/eus/gui-launch.log.'
             ;;
     esac
@@ -152,6 +162,7 @@ launch_gui_detached() {
 }
 
 launch_gui() {
+    # Optional arguments are passed to the GUI, e.g. --open kernel.
     local state_dir log_file attempt_log preferred_platform rc
     if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
         terminal_update
@@ -185,9 +196,9 @@ launch_gui() {
     attempt_log="$(mktemp "$state_dir/gui-attempt.XXXXXX")" || return 70
     if [[ -n "$preferred_platform" ]]; then
         QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM="$preferred_platform" \
-            "$PYTHON" "$GUI" >"$attempt_log" 2>&1
+            "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
     else
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 "$PYTHON" "$GUI" >"$attempt_log" 2>&1
+        QT_AUTO_SCREEN_SCALE_FACTOR=1 "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
     fi
     rc=$?
     cat "$attempt_log" >>"$log_file"
@@ -195,7 +206,7 @@ launch_gui() {
        grep -Eqi 'qt\.qpa|platform plugin|could not connect to display' "$attempt_log"; then
         printf '[%s] Retrying with Qt XCB platform.\n' "$(date --iso-8601=seconds)" >>"$log_file"
         : >"$attempt_log"
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM=xcb "$PYTHON" "$GUI" >"$attempt_log" 2>&1
+        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM=xcb "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
         rc=$?
         cat "$attempt_log" >>"$log_file"
     fi
@@ -221,6 +232,15 @@ read_state() {
     [[ "$UPDATE_STATE" == 'ok' ]]
 }
 
+updates_paused() {
+    local key value until=0
+    [[ -r "$PAUSE_FILE" ]] || return 1
+    while IFS='=' read -r key value; do
+        [[ "$key" == PAUSED_UNTIL && "$value" =~ ^[0-9]+$ ]] && until="$value"
+    done <"$PAUSE_FILE"
+    (( until > $(date +%s) ))
+}
+
 invoke_root() {
     local action="$1"; shift
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
@@ -232,6 +252,90 @@ invoke_root() {
     else
         return 77
     fi
+}
+
+invoke_root_terminal() {
+    # Render the backend progress protocol ("NN" / "# text") for a terminal.
+    local rc
+    invoke_root "$@" | awk '
+        /^[0-9]+$/ { pct = $0; next }
+        /^# / { printf "[%3d%%] %s\n", pct, substr($0, 3); fflush(); next }
+        NF { print; fflush() }'
+    rc="${PIPESTATUS[0]}"
+    if ((rc != 0)) && [[ -r /var/lib/eus/last-error ]]; then
+        printf 'ERROR: %s\n' "$(</var/lib/eus/last-error)" >&2
+    fi
+    return "$rc"
+}
+
+terminal_add_key() {
+    # --add-key NAME FILE|HTTPS-URL|KEY-ID [REPO-URI SUITE [COMPONENT...]]
+    local name="${1:-}" source="${2:-}" uri="${3:-}" suite="${4:-}"
+    local -a args=()
+    if [[ -z "$name" || -z "$source" ]]; then
+        usage >&2
+        return 64
+    fi
+    shift 2
+    args=(--name "$name")
+    if [[ -f "$source" ]]; then
+        args+=(--file "$(realpath -- "$source")")
+    elif [[ "$source" == https://* ]]; then
+        args+=(--url "$source")
+    elif [[ "$source" =~ ^(0x)?[0-9A-Fa-f]{8,40}$ ]]; then
+        args+=(--keyserver "$source")
+    else
+        printf 'The key source must be a file, an https:// URL, or a key ID.\n' >&2
+        return 64
+    fi
+    if [[ -n "$uri" ]]; then
+        [[ -n "$suite" ]] || { printf 'A repository also needs a suite, e.g. stable.\n' >&2; return 64; }
+        shift 2
+        args+=(--repo-uri "$uri" --suite "$suite")
+        (($#)) && args+=(--components "$*")
+    fi
+    invoke_root_terminal add-key "${args[@]}"
+}
+
+terminal_remove_old_kernels() {
+    local answer
+    local -a releases=()
+    mapfile -t releases < <("$PYTHON" -I "$TOOL" kernels --format old | sed '/^$/d')
+    if ((${#releases[@]} == 0)); then
+        printf 'No old kernel is installed.\n'
+        return 0
+    fi
+    printf 'Running kernel: %s\nOld kernels: %s\n' "$(uname -r)" "${releases[*]}"
+    read -r -p 'Remove them? [y/N] ' answer
+    case "${answer,,}" in y|yes|s|sim|sin|i|iya|ya) ;; *) return 0 ;; esac
+    invoke_root_terminal kernel-remove "${releases[@]}"
+}
+
+usage() {
+    cat <<'USAGE'
+Usage: eduka-update-system [OPTION]
+
+Graphical interface:
+  --ui                         open the update manager (default)
+  --open kernel|key-fix|add-key|settings
+                               open the manager directly on one dialog
+
+Terminal:
+  --terminal                   check and install updates in this terminal
+  --fix-keys                   repair missing/expired GPG keys and keyrings
+  --fix-duplicates             disable duplicate APT repository entries
+  --add-key NAME SOURCE [URI SUITE [COMPONENT...]]
+                               add a GPG key (file, https URL or key ID) and
+                               optionally a repository signed by it
+  --list-kernels               show installed and installable kernels
+  --install-kernel PACKAGE [--headers]
+  --remove-kernel RELEASE...   remove kernels (never the running one)
+  --remove-old-kernels         remove every kernel older than the running one
+  --pause DAYS                 pause automatic checks and notifications
+  --resume                     resume automatic checks
+  --schedule interval HOURS | daily HH:MM
+  --check-notify | --watch | --restart | --version
+USAGE
 }
 
 category_counts() {
@@ -311,6 +415,11 @@ send_update_notification() {
         panel_status hidden
         return 0
     fi
+    if updates_paused; then
+        # Paused by the user: no indicator and no desktop notification.
+        panel_status hidden
+        return 0
+    fi
     read_state || true
     user_flatpak_fingerprint
     local cache_dir last_file old body combined total urgency
@@ -320,12 +429,6 @@ send_update_notification() {
     total=$((UPDATE_COUNT + USER_FLATPAK_COUNT))
     if [[ "$total" -eq 0 ]]; then
         rm -f "$last_file"
-        panel_status hidden
-        return 0
-    fi
-    # While the manager is open, its own window is the update notification.
-    # Hide the panel indicator and avoid creating another desktop notification.
-    if eus_gui_is_running; then
         panel_status hidden
         return 0
     fi
@@ -387,6 +490,31 @@ send_restart_notification() {
     fi
 }
 
+send_old_kernel_notification() {
+    # Once per boot: after restarting into a new kernel, point to the old ones.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    local cache_dir stamp_file boot count action
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/old-kernel-notified"
+    boot="$(current_boot_id)"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$boot" ]] && return 0
+    mkdir -p "$cache_dir"
+    printf '%s\n' "$boot" >"$stamp_file"
+    count="$("$PYTHON" -I "$TOOL" kernels --format old 2>/dev/null | grep -c . || true)"
+    [[ "$count" =~ ^[0-9]+$ ]] && ((count > 0)) || return 0
+    if notify-send --help 2>&1 | grep -q -- '--action'; then
+        (
+            action="$(notify-send --app-name="$APP_NAME" --icon=eduka-update-system \
+                --urgency=low --expire-time=30000 --action="default=$OPEN_KERNEL" \
+                "$APP_NAME" "$(printf "$OLD_KERNEL_BODY" "$count")" 2>/dev/null || true)"
+            [[ "$action" == 'default' ]] && /usr/local/bin/eduka-update-system --open kernel >/dev/null 2>&1
+        ) &
+    else
+        notify-send --app-name="$APP_NAME" --icon=eduka-update-system --urgency=low \
+            "$APP_NAME" "$(printf "$OLD_KERNEL_BODY" "$count")" || true
+    fi
+}
+
 watch_updates() {
     local cache_dir lock_file
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
@@ -395,6 +523,7 @@ watch_updates() {
     exec 8>"$lock_file"
     flock -n 8 || exit 0
     sleep 5
+    send_old_kernel_notification
     while true; do
         send_update_notification
         send_restart_notification
@@ -405,14 +534,43 @@ watch_updates() {
 detect_language
 load_messages
 
-case "${1:---ui}" in
-    --ui)
-        launch_gui
+command_name="${1:---ui}"
+(($#)) && shift
+case "$command_name" in
+    --ui) launch_gui "$@" ;;
+    --open)
+        case "${1:-}" in
+            kernel|key-fix|add-key|settings) launch_gui --open "$1" ;;
+            *) usage >&2; exit 64 ;;
+        esac
         ;;
     --terminal|--run) terminal_update ;;
     --check-notify) send_update_notification; send_restart_notification ;;
     --watch) watch_updates ;;
     --restart) invoke_root reboot ;;
+    --fix-keys) invoke_root_terminal fix-keys ;;
+    --fix-duplicates) invoke_root_terminal fix-duplicates ;;
+    --add-key) terminal_add_key "$@" ;;
+    --list-kernels) "$PYTHON" -I "$TOOL" kernels --format text ;;
+    --install-kernel)
+        (($#)) || { usage >&2; exit 64; }
+        invoke_root_terminal kernel-install "$@"
+        ;;
+    --remove-kernel)
+        (($#)) || { usage >&2; exit 64; }
+        invoke_root_terminal kernel-remove "$@"
+        ;;
+    --remove-old-kernels) terminal_remove_old_kernels ;;
+    --pause)
+        [[ "${1:-}" =~ ^[0-9]+$ ]] || { usage >&2; exit 64; }
+        invoke_root_terminal pause "$1"
+        ;;
+    --resume) invoke_root_terminal pause 0 ;;
+    --schedule)
+        (($# == 2)) || { usage >&2; exit 64; }
+        invoke_root_terminal set-schedule "$1" "$2"
+        ;;
     --version) printf 'Eduka-Update-System %s\n' "$VERSION" ;;
-    *) printf 'Usage: %s [--ui|--terminal|--check-notify|--watch|--restart|--version]\n' "$0" >&2; exit 64 ;;
+    -h|--help) usage ;;
+    *) usage >&2; exit 64 ;;
 esac

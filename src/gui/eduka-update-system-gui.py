@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Minimal Qt 6 interface for Eduka-Update-System 0.12."""
+"""Qt 6 interface for Eduka-Update-System 0.13."""
 
 from __future__ import annotations
 
@@ -33,8 +33,13 @@ VERSION_FILE = Path(os.environ.get("EUS_VERSION_FILE", "/etc/eus/version"))
 INTERVAL_FILE = Path(os.environ.get("EUS_INTERVAL_FILE", "/etc/eus/interval-hours"))
 RESTART_FILE = Path(os.environ.get("EUS_RESTART_FILE", "/var/lib/eus/restart-required"))
 ROOT_HELPER = "/usr/local/libexec/eduka-update-system-root"
+TOOL = os.environ.get("EUS_TOOL", "/usr/local/libexec/eduka-update-system-tool")
+PAUSE_FILE = Path(os.environ.get("EUS_PAUSE_FILE", "/etc/eus/pause"))
+SCHEDULE_FILE = Path(os.environ.get("EUS_SCHEDULE_FILE", "/etc/eus/schedule"))
+APT_UPDATE_LOG = Path(os.environ.get("EUS_APT_UPDATE_LOG", "/var/lib/eus/apt-update.log"))
+REPORT_FILE = Path(os.environ.get("EUS_REPORT_FILE", "/var/lib/eus/repair-report.json"))
 PANEL_STATUS = "/usr/local/bin/eus-panel-status"
-EUS_VERSION = "0.12"
+EUS_VERSION = "0.13"
 EUS_APP_ICON = "/usr/share/icons/hicolor/48x48/apps/eduka-update-system.png"
 EUS_ICON_DIR = "/usr/lib/EUS-ICONS"
 EUS_ICON_IDLE = f"{EUS_ICON_DIR}/eus-update-idle.png"
@@ -136,13 +141,15 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
 
 
 try:
-    from PyQt6.QtCore import QProcess, QProcessEnvironment, QSize, Qt, QTimer
-    from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QKeySequence, QShortcut
+    from PyQt6.QtCore import (QFileSystemWatcher, QProcess, QProcessEnvironment, QSize, Qt,
+                              QTime, QTimer, pyqtSignal)
+    from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QKeySequence, QShortcut
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
     from PyQt6.QtWidgets import (
-        QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
-        QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
-        QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
+        QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
+        QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+        QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
+        QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QTimeEdit,
         QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
     )
 except ImportError as exc:
@@ -372,6 +379,272 @@ MESSAGES = {
     },
 }
 
+# Strings added in EUS 0.13. Missing translations fall back to English.
+EXTRA_MESSAGES = {
+    "en": {
+        "menu_updates": "&Updates", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
+        "menu_addkey": "&Add Key", "menu_settings": "&Settings", "menu_help": "&Help",
+        "action_quit": "Quit", "action_log": "View Log", "action_select_all": "Select All Updates",
+        "banner_paused": "Automatic update checks are paused until {date}.",
+        "resume": "Resume Updates",
+        "banner_repo": "Repository problems: {details}", "open_keyfix": "Open Key Fix",
+        "banner_kernel": "{count} old kernel(s) can be removed safely.", "open_kernel": "Manage Kernels",
+        "chip_critical": "Critical", "chip_medium": "Important", "chip_normal": "Regular",
+        "chip_flatpak": "Flatpak",
+        "repo_unreachable": "{count} unreachable repository(ies)", "kf_unreachable": "Repository cannot be reached (network or address problem)",
+        "repo_missing": "{count} missing key(s)", "repo_expired": "{count} expired key(s)",
+        "repo_duplicates": "{count} duplicate repository entr(ies)",
+        "repo_unsigned": "{count} unsigned repository(ies)", "repo_legacy": "legacy keyring in use",
+        "repo_conflict": "conflicting Signed-By values",
+        "working": "Working…", "busy": "Another EUS operation is still running. Wait for it to finish.",
+        "next_check": "Schedule: {schedule}", "schedule_interval": "every {hours} hours",
+        "schedule_daily": "daily at {time}", "schedule_week": "every week",
+        "kernel_title": "Kernel Manager", "kernel_running": "Running kernel: {release}",
+        "kernel_intro": "The kernel in use can never be removed. After a new kernel is installed and the computer restarts, the previous kernel is marked “Old kernel” and can be removed safely.",
+        "k_col_release": "Kernel", "k_col_status": "Status", "k_col_version": "Package version",
+        "k_col_size": "Size",
+        "k_state_running": "In use (running)", "k_state_old": "Old kernel — safe to remove",
+        "k_state_newer": "New — restart to use", "k_state_residual": "Leftover configuration",
+        "k_installed": "Installed kernels", "k_available": "Install a new kernel",
+        "k_headers": "Also install matching kernel headers (needed by drivers such as NVIDIA or VirtualBox)",
+        "k_install": "Install Kernel", "k_remove": "Remove Selected", "k_remove_old": "Remove All Old Kernels",
+        "k_refresh": "Refresh", "k_loading": "Reading kernel information…",
+        "k_none_available": "No other kernel is available from the configured repositories.",
+        "k_meta": "{package} — always the latest kernel of this series (recommended)",
+        "k_confirm_install": "Install {package}?\n\nRestart the computer afterward to start using the new kernel.",
+        "k_confirm_remove": "Remove these kernels?\n\n{items}\n\nThe running kernel is not affected.",
+        "k_installed_ok": "The kernel was installed. Restart the computer to start using it; the current kernel will then be marked as an old kernel.",
+        "k_removed_ok": "The selected kernels were removed.", "k_no_old": "There is no old kernel to remove.",
+        "k_select": "Select at least one removable kernel.",
+        "kf_title": "Key Fix — Repository and GPG Key Repair",
+        "kf_intro": "Key Fix checks the APT signing keys and repository lists, downloads missing or expired keys, repairs damaged keyrings and removes duplicate repository entries. Backups are kept in /var/backups/eus.",
+        "kf_tab_keys": "GPG keys", "kf_tab_repos": "Duplicate repositories",
+        "kf_col_item": "Item", "kf_col_problem": "Problem",
+        "kf_ok_keys": "No GPG key problem was found.", "kf_ok_repos": "No duplicate repository was found.",
+        "kf_fix_keys": "Repair GPG Keys", "kf_fix_dups": "Fix Duplicates", "kf_rescan": "Scan Again",
+        "kf_scanning": "Scanning repositories and keyrings…",
+        "kf_missing": "Missing signing key", "kf_expired": "Expired or revoked signing key",
+        "kf_unsigned": "Repository is not signed", "kf_conflict": "Conflicting Signed-By values",
+        "kf_missing_file": "Signed-By keyring file is missing", "kf_legacy": "Keys are stored in the deprecated trusted.gpg keyring",
+        "kf_multiple": "Repository configured multiple times",
+        "kf_dup_complete": "Duplicate of {first} — will be disabled",
+        "kf_dup_partial": "Partly duplicates {first} — repeated components will be removed",
+        "kf_done": "Repair finished.", "kf_remaining": "Some problems remain:",
+        "kf_backup": "Backups: {path}", "kf_last_update": "Based on the last repository refresh: {time}",
+        "kf_no_refresh": "Run Check for Updates once so EUS can detect missing keys.",
+        "ak_title": "Add Key — Install a GPG Key or Repository",
+        "ak_intro": "Add the signing key of a repository you trust. Without a repository the key is trusted for all repositories (for repositories added in a terminal); with a repository, EUS adds it safely with Signed-By and never creates a duplicate entry.",
+        "ak_name": "Name", "ak_name_hint": "e.g. vendor-tools", "ak_source": "Key source",
+        "ak_file": "Key file", "ak_browse": "Browse…", "ak_url": "Key URL (https)",
+        "ak_keyserver": "Key ID / fingerprint", "ak_repo": "Also add the repository that uses this key",
+        "ak_repo_uri": "Repository URI", "ak_suite": "Suite", "ak_components": "Components",
+        "ak_arch": "Architectures", "ak_optional": "optional", "ak_source_pkgs": "Also enable source packages (deb-src)",
+        "ak_preview": "Result", "ak_add": "Add Key",
+        "ak_added": "The key was added and the package lists were refreshed.",
+        "ak_invalid_name": "Enter a name using lowercase letters, digits, dots, dashes or underscores.",
+        "ak_missing_source": "Choose a key file, an https URL, or a key ID.",
+        "ak_invalid_repo": "Enter the repository URI, the suite and the components.",
+        "ak_select_file": "Select a GPG key file", "ak_key_info": "Key: {uid} ({keyid})",
+        "ak_preview_key": "The key will be trusted for every repository:\n/etc/apt/trusted.gpg.d/{name}.gpg",
+        "ak_preview_repo": "/etc/apt/keyrings/{name}.gpg\n/etc/apt/sources.list.d/{name}.sources:\n\n{stanza}",
+        "st_schedule": "Update check schedule", "st_every": "Check every", "st_daily": "Check once a day at",
+        "st_pause": "Pause updates", "st_pause_for": "Pause for", "st_days": "days",
+        "st_pause_button": "Pause", "st_resume_button": "Resume Now",
+        "st_not_paused": "Automatic checks are active.", "st_paused_until": "Paused until {date}.",
+        "st_pause_note": "While paused, EUS does not check automatically and shows no update notifications. You can still check and install manually.",
+        "st_week": "Every week", "st_general": "Notifications",
+        "log_title": "EUS Log",
+    },
+    "id": {
+        "menu_updates": "&Pembaruan", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
+        "menu_addkey": "&Add Key", "menu_settings": "Pe&ngaturan", "menu_help": "&Bantuan",
+        "action_quit": "Keluar", "action_log": "Lihat Log", "action_select_all": "Pilih Semua Pembaruan",
+        "banner_paused": "Pemeriksaan pembaruan otomatis dijeda sampai {date}.",
+        "resume": "Lanjutkan Pembaruan",
+        "banner_repo": "Masalah repositori: {details}", "open_keyfix": "Buka Key Fix",
+        "banner_kernel": "{count} kernel lama dapat dihapus dengan aman.", "open_kernel": "Kelola Kernel",
+        "chip_critical": "Kritis", "chip_medium": "Penting", "chip_normal": "Biasa", "chip_flatpak": "Flatpak",
+        "repo_unreachable": "{count} repositori tidak dapat dihubungi", "kf_unreachable": "Repositori tidak dapat dihubungi (masalah jaringan atau alamat)",
+        "repo_missing": "{count} kunci hilang", "repo_expired": "{count} kunci kedaluwarsa",
+        "repo_duplicates": "{count} entri repositori duplikat",
+        "repo_unsigned": "{count} repositori tidak ditandatangani", "repo_legacy": "keyring lama masih dipakai",
+        "repo_conflict": "nilai Signed-By bertentangan",
+        "working": "Sedang bekerja…", "busy": "Operasi EUS lain masih berjalan. Tunggu hingga selesai.",
+        "next_check": "Jadwal: {schedule}", "schedule_interval": "setiap {hours} jam",
+        "schedule_daily": "setiap hari pukul {time}", "schedule_week": "setiap minggu",
+        "kernel_title": "Pengelola Kernel", "kernel_running": "Kernel yang berjalan: {release}",
+        "kernel_intro": "Kernel yang sedang dipakai tidak pernah dapat dihapus. Setelah kernel baru dipasang dan komputer dimulai ulang, kernel sebelumnya ditandai “Kernel lama” dan dapat dihapus dengan aman.",
+        "k_col_release": "Kernel", "k_col_status": "Status", "k_col_version": "Versi paket", "k_col_size": "Ukuran",
+        "k_state_running": "Sedang dipakai (berjalan)", "k_state_old": "Kernel lama — aman dihapus",
+        "k_state_newer": "Baru — mulai ulang untuk memakai", "k_state_residual": "Sisa konfigurasi",
+        "k_installed": "Kernel terpasang", "k_available": "Pasang kernel baru",
+        "k_headers": "Pasang juga header kernel yang sesuai (diperlukan driver seperti NVIDIA atau VirtualBox)",
+        "k_install": "Pasang Kernel", "k_remove": "Hapus yang Dipilih", "k_remove_old": "Hapus Semua Kernel Lama",
+        "k_refresh": "Muat Ulang", "k_loading": "Membaca informasi kernel…",
+        "k_none_available": "Tidak ada kernel lain yang tersedia dari repositori yang dikonfigurasi.",
+        "k_meta": "{package} — selalu kernel terbaru dari seri ini (disarankan)",
+        "k_confirm_install": "Pasang {package}?\n\nMulai ulang komputer setelahnya untuk mulai memakai kernel baru.",
+        "k_confirm_remove": "Hapus kernel berikut?\n\n{items}\n\nKernel yang sedang berjalan tidak terpengaruh.",
+        "k_installed_ok": "Kernel berhasil dipasang. Mulai ulang komputer untuk memakainya; kernel saat ini akan ditandai sebagai kernel lama.",
+        "k_removed_ok": "Kernel yang dipilih telah dihapus.", "k_no_old": "Tidak ada kernel lama untuk dihapus.",
+        "k_select": "Pilih minimal satu kernel yang dapat dihapus.",
+        "kf_title": "Key Fix — Perbaikan Repositori dan Kunci GPG",
+        "kf_intro": "Key Fix memeriksa kunci penandatangan APT dan daftar repositori, mengunduh kunci yang hilang atau kedaluwarsa, memperbaiki keyring yang rusak, dan menghapus entri repositori duplikat. Cadangan disimpan di /var/backups/eus.",
+        "kf_tab_keys": "Kunci GPG", "kf_tab_repos": "Repositori duplikat",
+        "kf_col_item": "Item", "kf_col_problem": "Masalah",
+        "kf_ok_keys": "Tidak ditemukan masalah kunci GPG.", "kf_ok_repos": "Tidak ditemukan repositori duplikat.",
+        "kf_fix_keys": "Perbaiki Kunci GPG", "kf_fix_dups": "Perbaiki Duplikat", "kf_rescan": "Pindai Lagi",
+        "kf_scanning": "Memindai repositori dan keyring…",
+        "kf_missing": "Kunci penandatangan hilang", "kf_expired": "Kunci penandatangan kedaluwarsa atau dicabut",
+        "kf_unsigned": "Repositori tidak ditandatangani", "kf_conflict": "Nilai Signed-By bertentangan",
+        "kf_missing_file": "Berkas keyring Signed-By tidak ada", "kf_legacy": "Kunci tersimpan di keyring lama trusted.gpg",
+        "kf_multiple": "Repositori dikonfigurasi lebih dari sekali",
+        "kf_dup_complete": "Duplikat dari {first} — akan dinonaktifkan",
+        "kf_dup_partial": "Sebagian menduplikasi {first} — komponen ganda akan dihapus",
+        "kf_done": "Perbaikan selesai.", "kf_remaining": "Masih ada masalah:",
+        "kf_backup": "Cadangan: {path}", "kf_last_update": "Berdasarkan pembaruan repositori terakhir: {time}",
+        "kf_no_refresh": "Jalankan Periksa Pembaruan sekali agar EUS dapat mendeteksi kunci yang hilang.",
+        "ak_title": "Add Key — Pasang Kunci GPG atau Repositori",
+        "ak_intro": "Tambahkan kunci penandatangan dari repositori yang Anda percayai. Tanpa repositori, kunci dipercaya untuk semua repositori (untuk repositori yang ditambahkan lewat terminal); dengan repositori, EUS menambahkannya dengan aman memakai Signed-By dan tidak pernah membuat entri duplikat.",
+        "ak_name": "Nama", "ak_name_hint": "mis. vendor-tools", "ak_source": "Sumber kunci",
+        "ak_file": "Berkas kunci", "ak_browse": "Telusuri…", "ak_url": "URL kunci (https)",
+        "ak_keyserver": "ID / sidik jari kunci", "ak_repo": "Tambahkan juga repositori yang memakai kunci ini",
+        "ak_repo_uri": "URI repositori", "ak_suite": "Suite", "ak_components": "Komponen",
+        "ak_arch": "Arsitektur", "ak_optional": "opsional", "ak_source_pkgs": "Aktifkan juga paket sumber (deb-src)",
+        "ak_preview": "Hasil", "ak_add": "Tambah Kunci",
+        "ak_added": "Kunci berhasil ditambahkan dan daftar paket telah diperbarui.",
+        "ak_invalid_name": "Masukkan nama dengan huruf kecil, angka, titik, tanda hubung, atau garis bawah.",
+        "ak_missing_source": "Pilih berkas kunci, URL https, atau ID kunci.",
+        "ak_invalid_repo": "Masukkan URI repositori, suite, dan komponen.",
+        "ak_select_file": "Pilih berkas kunci GPG", "ak_key_info": "Kunci: {uid} ({keyid})",
+        "ak_preview_key": "Kunci akan dipercaya untuk semua repositori:\n/etc/apt/trusted.gpg.d/{name}.gpg",
+        "st_schedule": "Jadwal pemeriksaan pembaruan", "st_every": "Periksa setiap",
+        "st_daily": "Periksa sekali sehari pukul", "st_pause": "Jeda pembaruan", "st_pause_for": "Jeda selama",
+        "st_days": "hari", "st_pause_button": "Jeda", "st_resume_button": "Lanjutkan Sekarang",
+        "st_not_paused": "Pemeriksaan otomatis aktif.", "st_paused_until": "Dijeda sampai {date}.",
+        "st_pause_note": "Selama dijeda, EUS tidak memeriksa secara otomatis dan tidak menampilkan notifikasi pembaruan. Anda tetap dapat memeriksa dan memasang secara manual.",
+        "st_week": "Setiap minggu", "st_general": "Notifikasi", "log_title": "Log EUS",
+    },
+    "pt": {
+        "menu_updates": "&Atualizacoes", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
+        "menu_addkey": "&Add Key", "menu_settings": "&Configuracoes", "menu_help": "A&juda",
+        "action_quit": "Sair", "action_log": "Ver Registo", "action_select_all": "Selecionar Todas",
+        "banner_paused": "As verificacoes automaticas estao em pausa ate {date}.",
+        "resume": "Retomar Atualizacoes",
+        "banner_repo": "Problemas nos repositorios: {details}", "open_keyfix": "Abrir Key Fix",
+        "banner_kernel": "{count} kernel(s) antigo(s) pode(m) ser removido(s) com seguranca.",
+        "open_kernel": "Gerir Kernels",
+        "chip_critical": "Criticas", "chip_medium": "Importantes", "chip_normal": "Regulares", "chip_flatpak": "Flatpak",
+        "repo_unreachable": "{count} repositorio(s) inacessivel(is)", "kf_unreachable": "Repositorio inacessivel (problema de rede ou endereco)",
+        "repo_missing": "{count} chave(s) em falta", "repo_expired": "{count} chave(s) expirada(s)",
+        "repo_duplicates": "{count} entrada(s) de repositorio duplicada(s)",
+        "repo_unsigned": "{count} repositorio(s) sem assinatura", "repo_legacy": "keyring antigo em uso",
+        "repo_conflict": "valores Signed-By em conflito",
+        "working": "Processando…", "busy": "Outra operacao do EUS ainda esta em curso. Aguarde.",
+        "next_check": "Agenda: {schedule}", "schedule_interval": "a cada {hours} horas",
+        "schedule_daily": "diariamente as {time}", "schedule_week": "semanalmente",
+        "kernel_title": "Gestor de Kernels", "kernel_running": "Kernel em execucao: {release}",
+        "kernel_intro": "O kernel em uso nunca pode ser removido. Depois de instalar um kernel novo e reiniciar, o kernel anterior e marcado como “Kernel antigo” e pode ser removido com seguranca.",
+        "k_col_release": "Kernel", "k_col_status": "Estado", "k_col_version": "Versao do pacote", "k_col_size": "Tamanho",
+        "k_state_running": "Em uso (em execucao)", "k_state_old": "Kernel antigo — pode ser removido",
+        "k_state_newer": "Novo — reinicie para usar", "k_state_residual": "Configuracao residual",
+        "k_installed": "Kernels instalados", "k_available": "Instalar um kernel novo",
+        "k_headers": "Instalar tambem os headers do kernel (necessarios para drivers como NVIDIA ou VirtualBox)",
+        "k_install": "Instalar Kernel", "k_remove": "Remover Selecionados", "k_remove_old": "Remover Kernels Antigos",
+        "k_refresh": "Atualizar", "k_loading": "Lendo informacoes dos kernels…",
+        "k_none_available": "Nenhum outro kernel esta disponivel nos repositorios configurados.",
+        "k_meta": "{package} — sempre o kernel mais recente desta serie (recomendado)",
+        "k_confirm_install": "Instalar {package}?\n\nReinicie o computador depois para usar o kernel novo.",
+        "k_confirm_remove": "Remover estes kernels?\n\n{items}\n\nO kernel em execucao nao e afetado.",
+        "k_installed_ok": "O kernel foi instalado. Reinicie o computador para usa-lo; o kernel atual sera marcado como antigo.",
+        "k_removed_ok": "Os kernels selecionados foram removidos.", "k_no_old": "Nao ha kernels antigos para remover.",
+        "k_select": "Selecione pelo menos um kernel removivel.",
+        "kf_title": "Key Fix — Reparacao de Repositorios e Chaves GPG",
+        "kf_intro": "O Key Fix verifica as chaves de assinatura do APT e as listas de repositorios, transfere chaves em falta ou expiradas, repara keyrings danificados e remove entradas duplicadas. As copias de seguranca ficam em /var/backups/eus.",
+        "kf_tab_keys": "Chaves GPG", "kf_tab_repos": "Repositorios duplicados",
+        "kf_col_item": "Item", "kf_col_problem": "Problema",
+        "kf_ok_keys": "Nenhum problema de chaves GPG encontrado.", "kf_ok_repos": "Nenhum repositorio duplicado encontrado.",
+        "kf_fix_keys": "Reparar Chaves GPG", "kf_fix_dups": "Corrigir Duplicados", "kf_rescan": "Verificar Novamente",
+        "kf_scanning": "Verificando repositorios e keyrings…",
+        "kf_missing": "Chave de assinatura em falta", "kf_expired": "Chave expirada ou revogada",
+        "kf_unsigned": "Repositorio sem assinatura", "kf_conflict": "Valores Signed-By em conflito",
+        "kf_missing_file": "Ficheiro de keyring Signed-By em falta", "kf_legacy": "Chaves no keyring obsoleto trusted.gpg",
+        "kf_multiple": "Repositorio configurado varias vezes",
+        "kf_dup_complete": "Duplicado de {first} — sera desativado",
+        "kf_dup_partial": "Duplica parcialmente {first} — componentes repetidos serao removidos",
+        "kf_done": "Reparacao concluida.", "kf_remaining": "Ainda existem problemas:",
+        "kf_backup": "Copias de seguranca: {path}", "kf_last_update": "Com base na ultima atualizacao: {time}",
+        "kf_no_refresh": "Execute Verificar atualizacoes uma vez para o EUS detetar chaves em falta.",
+        "ak_title": "Add Key — Instalar Chave GPG ou Repositorio",
+        "ak_intro": "Adicione a chave de assinatura de um repositorio confiavel. Sem repositorio, a chave e confiavel para todos os repositorios; com repositorio, o EUS adiciona-o com Signed-By e nunca cria entradas duplicadas.",
+        "ak_name": "Nome", "ak_name_hint": "ex. vendor-tools", "ak_source": "Origem da chave",
+        "ak_file": "Ficheiro da chave", "ak_browse": "Procurar…", "ak_url": "URL da chave (https)",
+        "ak_keyserver": "ID / impressao digital", "ak_repo": "Adicionar tambem o repositorio que usa esta chave",
+        "ak_repo_uri": "URI do repositorio", "ak_suite": "Suite", "ak_components": "Componentes",
+        "ak_arch": "Arquiteturas", "ak_optional": "opcional", "ak_source_pkgs": "Ativar tambem pacotes fonte (deb-src)",
+        "ak_preview": "Resultado", "ak_add": "Adicionar Chave",
+        "ak_added": "A chave foi adicionada e as listas de pacotes foram atualizadas.",
+        "ak_invalid_name": "Use letras minusculas, digitos, pontos, hifens ou sublinhados no nome.",
+        "ak_missing_source": "Escolha um ficheiro, um URL https ou um ID de chave.",
+        "ak_invalid_repo": "Indique o URI, a suite e os componentes do repositorio.",
+        "ak_select_file": "Selecionar ficheiro de chave GPG", "ak_key_info": "Chave: {uid} ({keyid})",
+        "ak_preview_key": "A chave sera confiavel para todos os repositorios:\n/etc/apt/trusted.gpg.d/{name}.gpg",
+        "st_schedule": "Agenda de verificacao", "st_every": "Verificar a cada", "st_daily": "Verificar diariamente as",
+        "st_pause": "Pausar atualizacoes", "st_pause_for": "Pausar durante", "st_days": "dias",
+        "st_pause_button": "Pausar", "st_resume_button": "Retomar Agora",
+        "st_not_paused": "As verificacoes automaticas estao ativas.", "st_paused_until": "Em pausa ate {date}.",
+        "st_pause_note": "Em pausa, o EUS nao verifica automaticamente nem mostra notificacoes. Pode verificar e instalar manualmente.",
+        "st_week": "Semanalmente", "st_general": "Notificacoes", "log_title": "Registo do EUS",
+    },
+    "tet": {
+        "menu_updates": "&Atualizasaun", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
+        "menu_addkey": "&Add Key", "menu_settings": "&Konfigurasaun", "menu_help": "A&judu",
+        "action_quit": "Sai", "action_log": "Haree Log", "action_select_all": "Hili Atualizasaun Hotu",
+        "banner_paused": "Verifikasaun automatiku pauza to'o {date}.", "resume": "Kontinua Atualizasaun",
+        "banner_repo": "Problema repositoriu: {details}", "open_keyfix": "Loke Key Fix",
+        "banner_kernel": "Kernel tuan {count} bele hasai ho seguru.", "open_kernel": "Jere Kernel",
+        "chip_critical": "Kritiku", "chip_medium": "Importante", "chip_normal": "Regular", "chip_flatpak": "Flatpak",
+        "repo_unreachable": "repositoriu {count} la bele asesu", "kf_unreachable": "Repositoriu la bele asesu (problema rede ka enderesu)",
+        "repo_missing": "xave {count} lakon", "repo_expired": "xave {count} expiradu",
+        "repo_duplicates": "repositoriu duplikadu {count}", "repo_unsigned": "repositoriu {count} la iha asinatura",
+        "repo_legacy": "uza hela keyring tuan", "repo_conflict": "valor Signed-By konflitu",
+        "working": "Servisu hela…", "busy": "Operasaun EUS seluk sei la'o hela. Hein to'o remata.",
+        "next_check": "Oráriu: {schedule}", "schedule_interval": "kada oras {hours}",
+        "schedule_daily": "loron-loron oras {time}", "schedule_week": "kada semana",
+        "kernel_title": "Jestór Kernel", "kernel_running": "Kernel nebe la'o hela: {release}",
+        "kernel_intro": "Kernel nebe uza hela labele hasai. Depois instala kernel foun no hahu fali komputadór, kernel uluk sei hetan marka “Kernel tuan” no bele hasai ho seguru.",
+        "k_col_release": "Kernel", "k_col_status": "Estadu", "k_col_version": "Versaun pakote", "k_col_size": "Tamañu",
+        "k_state_running": "Uza hela (la'o hela)", "k_state_old": "Kernel tuan — bele hasai",
+        "k_state_newer": "Foun — hahu fali atu uza", "k_state_residual": "Konfigurasaun restu",
+        "k_installed": "Kernel nebe instaladu", "k_available": "Instala kernel foun",
+        "k_headers": "Instala mos header kernel (presiza ba driver hanesan NVIDIA ka VirtualBox)",
+        "k_install": "Instala Kernel", "k_remove": "Hasai Nebe Hili", "k_remove_old": "Hasai Kernel Tuan Hotu",
+        "k_refresh": "Atualiza", "k_loading": "Lee informasaun kernel…",
+        "k_none_available": "Kernel seluk la disponivel husi repositoriu sira.",
+        "k_meta": "{package} — kernel foun liu husi seri ida-ne'e (rekomenda)",
+        "k_confirm_install": "Instala {package}?\n\nHahu fali komputadór depois atu uza kernel foun.",
+        "k_confirm_remove": "Hasai kernel sira-ne'e?\n\n{items}\n\nKernel nebe la'o hela la afeta.",
+        "k_installed_ok": "Kernel instala ona. Hahu fali komputadór atu uza; kernel agora sei hetan marka kernel tuan.",
+        "k_removed_ok": "Kernel nebe hili hasai ona.", "k_no_old": "Kernel tuan la iha atu hasai.",
+        "k_select": "Hili kernel ida ne'ebé bele hasai.",
+        "kf_title": "Key Fix — Hadi'a Repositoriu no Xave GPG",
+        "kf_tab_keys": "Xave GPG", "kf_tab_repos": "Repositoriu duplikadu",
+        "kf_col_problem": "Problema", "kf_ok_keys": "Problema xave GPG la iha.",
+        "kf_ok_repos": "Repositoriu duplikadu la iha.", "kf_fix_keys": "Hadi'a Xave GPG",
+        "kf_fix_dups": "Hadi'a Duplikadu", "kf_rescan": "Verifika Fali", "kf_done": "Hadi'a remata.",
+        "ak_title": "Add Key — Instala Xave GPG ka Repositoriu", "ak_name": "Naran",
+        "ak_source": "Fonte xave", "ak_file": "Arkivu xave", "ak_browse": "Buka…",
+        "ak_add": "Aumenta Xave", "ak_added": "Xave aumenta ona no lista pakote atualiza ona.",
+        "st_schedule": "Oráriu verifikasaun", "st_every": "Verifika kada", "st_daily": "Verifika loron-loron oras",
+        "st_pause": "Pauza atualizasaun", "st_pause_for": "Pauza durante", "st_days": "loron",
+        "st_pause_button": "Pauza", "st_resume_button": "Kontinua Agora",
+        "st_not_paused": "Verifikasaun automatiku ativu.", "st_paused_until": "Pauza to'o {date}.",
+        "st_week": "Kada semana", "st_general": "Notifikasaun",
+    },
+}
+for _lang, _values in EXTRA_MESSAGES.items():
+    MESSAGES[_lang].update(_values)
+
 CATEGORY_COLORS = {
     "critical": ("#D92D20", "#FFF1F0", "#7A271A"),
     "medium": ("#E6A700", "#FFF8E1", "#7A4D00"),
@@ -499,15 +772,104 @@ def gui_runtime_dir() -> Path:
     return base / "eduka-update-system"
 
 
+CATEGORY_ORDER = ("critical", "medium", "normal", "flatpak")
+INTERVAL_CHOICES = (1, 3, 6, 12, 24, 48, 168)
+NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+
+def translate(lang: str, key: str, **values) -> str:
+    text = MESSAGES.get(lang, MESSAGES["en"]).get(key) or MESSAGES["en"].get(key, key)
+    return text.format(**values) if values else text
+
+
+def format_date(epoch: int) -> str:
+    try:
+        return datetime.fromtimestamp(epoch).strftime("%A, %d %B %Y · %H:%M")
+    except (OverflowError, OSError, ValueError):
+        return "—"
+
+
+def paused_until() -> int:
+    """Epoch until which automatic checks are paused, or 0 when they are active."""
+    try:
+        until = int(read_key_values(PAUSE_FILE).get("PAUSED_UNTIL", "0"))
+    except ValueError:
+        return 0
+    return until if until > datetime.now().timestamp() else 0
+
+
+def read_schedule() -> dict:
+    data = read_key_values(SCHEDULE_FILE)
+    try:
+        hours = int(data.get("INTERVAL_HOURS") or INTERVAL_FILE.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        hours = 6
+    if hours not in INTERVAL_CHOICES:
+        hours = 6
+    daily = data.get("DAILY_TIME", "09:00")
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", daily):
+        daily = "09:00"
+    mode = data.get("SCHEDULE_MODE", "interval")
+    return {"mode": mode if mode in {"interval", "daily"} else "interval", "hours": hours, "daily": daily}
+
+
+def tool_command(*args: str) -> list[str]:
+    return [sys.executable or "/usr/bin/python3", "-I", TOOL, *args]
+
+
+def run_tool_json(*args: str, timeout: int = 20) -> dict | list | None:
+    try:
+        result = subprocess.run(tool_command(*args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, timeout=timeout, check=False)
+        return json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def repo_problem_text(lang: str, scan: dict | None) -> str:
+    if not scan:
+        return ""
+    apt = scan.get("apt", {})
+    parts = []
+    for key, items in (("repo_unreachable", apt.get("unreachable", [])),
+                       ("repo_missing", apt.get("missing_keys", [])),
+                       ("repo_expired", apt.get("expired_keys", [])),
+                       ("repo_unsigned", apt.get("unsigned", []))):
+        if items:
+            parts.append(translate(lang, key, count=len(items)))
+    duplicates = len(scan.get("duplicates", [])) or len(apt.get("configured_multiple_times", []))
+    if duplicates:
+        parts.append(translate(lang, "repo_duplicates", count=duplicates))
+    if apt.get("signed_by_conflicts"):
+        parts.append(translate(lang, "repo_conflict"))
+    if apt.get("legacy_warning"):
+        parts.append(translate(lang, "repo_legacy"))
+    return ", ".join(parts)
+
+
+def style_button_box(box: QDialogButtonBox) -> None:
+    """Give standard dialog buttons the EUS look (primary for accept roles)."""
+    for button in box.buttons():
+        role = box.buttonRole(button)
+        primary = role in {QDialogButtonBox.ButtonRole.AcceptRole, QDialogButtonBox.ButtonRole.YesRole}
+        button.setObjectName("primaryButton" if primary else "secondaryButton")
+
+
+def mono_font() -> QFont:
+    font = QFont("monospace")
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    return font
+
+
 INSTANCE_NAME = f"eduka-update-system-{os.getuid()}"
 
 
-def request_existing_window() -> bool:
+def request_existing_window(page: str = "") -> bool:
     socket = QLocalSocket()
     socket.connectToServer(INSTANCE_NAME)
     if not socket.waitForConnected(350):
         return False
-    socket.write(b"show\n")
+    socket.write(f"open:{page}\n".encode() if page else b"show\n")
     socket.flush()
     socket.waitForBytesWritten(350)
     socket.disconnectFromServer()
@@ -523,6 +885,884 @@ def gui_pid_is_live() -> bool:
         return b"eduka-update-system-gui" in command_line
     except (OSError, ValueError):
         return False
+
+
+class PrivilegedTask(QWidget):
+    """Runs one root-backend action with a progress bar; used by the dialogs."""
+
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, owner: "UpdateWindow", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.owner = owner
+        self.process: QProcess | None = None
+        self.buffer = ""
+        self.started_at = 0.0
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        self.label = QLabel(objectName="taskLabel")
+        self.label.setWordWrap(True)
+        self.bar = QProgressBar(objectName="taskProgress")
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(True)
+        layout.addWidget(self.label)
+        layout.addWidget(self.bar)
+        self.hide()
+
+    def running(self) -> bool:
+        return self.process is not None
+
+    def start(self, action: str, extra: list[str], text: str) -> bool:
+        if self.process is not None or self.owner.is_busy():
+            QMessageBox.information(self.window(), "EUS", self.owner.t("busy"))
+            return False
+        program, args = self.owner.privileged_command(action, extra)
+        self.process = QProcess(self)
+        self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("LC_ALL", "C.UTF-8")
+        environment.insert("LANG", "C.UTF-8")
+        self.process.setProcessEnvironment(environment)
+        self.process.readyReadStandardOutput.connect(self.read_output)
+        self.process.finished.connect(self.process_finished)
+        self.process.errorOccurred.connect(self.process_error)
+        self.buffer = ""
+        self.started_at = datetime.now().timestamp()
+        self.bar.setValue(1)
+        self.label.setText(text)
+        self.show()
+        self.owner.external_busy = True
+        self.owner.set_busy(True, text)
+        self.process.start(program, args)
+        return True
+
+    def read_output(self) -> None:
+        if self.process is None:
+            return
+        self.buffer += bytes(self.process.readAllStandardOutput()).decode("utf-8", "replace").replace("\r", "\n")
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            text = line.strip()
+            if text.isdigit():
+                self.bar.setValue(max(self.bar.value(), min(100, int(text))))
+            elif text.startswith("# "):
+                self.label.setText(text[2:])
+
+    def process_error(self, error) -> None:
+        if error == QProcess.ProcessError.FailedToStart and self.process is not None:
+            QTimer.singleShot(0, lambda: self.process_finished(127, QProcess.ExitStatus.CrashExit))
+
+    def process_finished(self, exit_code: int, _status=None) -> None:
+        if self.process is None:
+            return
+        self.read_output()
+        process, self.process = self.process, None
+        process.deleteLater()
+        self.owner.external_busy = False
+        self.owner.set_busy(False)
+        if exit_code == 0:
+            self.bar.setValue(100)
+            self.finished.emit(True, "")
+            return
+        self.finished.emit(False, self.owner.failure_detail(exit_code, self.started_at))
+
+
+class KernelDialog(QDialog):
+    """Install a new kernel or safely remove old ones."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.data: dict = {}
+        self.changed = False
+        self.loader: QProcess | None = None
+        self.setWindowTitle(self.t("kernel_title"))
+        self.resize(820, 600)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        title = QLabel(self.t("kernel_title"), objectName="dialogTitle")
+        intro = QLabel(self.t("kernel_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        self.running_label = QLabel(objectName="runningKernel")
+        layout.addWidget(title)
+        layout.addWidget(intro)
+        layout.addWidget(self.running_label)
+
+        installed_box = QGroupBox(self.t("k_installed"))
+        installed_layout = QVBoxLayout(installed_box)
+        self.tree = QTreeWidget(objectName="kernelTree")
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels([self.t("k_col_release"), self.t("k_col_status"),
+                                   self.t("k_col_version"), self.t("k_col_size")])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.itemChanged.connect(lambda *_: self.update_buttons())
+        installed_layout.addWidget(self.tree)
+        remove_row = QHBoxLayout()
+        self.refresh_button = QPushButton(self.t("k_refresh"), objectName="secondaryButton")
+        self.remove_old_button = QPushButton(self.t("k_remove_old"), objectName="secondaryButton")
+        self.remove_button = QPushButton(self.t("k_remove"), objectName="dangerButton")
+        self.refresh_button.clicked.connect(self.load)
+        self.remove_old_button.clicked.connect(self.remove_old)
+        self.remove_button.clicked.connect(self.remove_selected)
+        remove_row.addWidget(self.refresh_button)
+        remove_row.addStretch(1)
+        remove_row.addWidget(self.remove_old_button)
+        remove_row.addWidget(self.remove_button)
+        installed_layout.addLayout(remove_row)
+        layout.addWidget(installed_box, 1)
+
+        install_box = QGroupBox(self.t("k_available"))
+        install_layout = QVBoxLayout(install_box)
+        self.available = QComboBox()
+        self.available.setMinimumWidth(420)
+        self.headers = QCheckBox(self.t("k_headers"))
+        self.install_button = QPushButton(self.t("k_install"), objectName="primaryButton")
+        self.install_button.clicked.connect(self.install_kernel)
+        self.available_note = QLabel(objectName="muted")
+        self.available_note.setWordWrap(True)
+        row = QHBoxLayout()
+        row.addWidget(self.available, 1)
+        row.addWidget(self.install_button)
+        install_layout.addLayout(row)
+        install_layout.addWidget(self.headers)
+        install_layout.addWidget(self.available_note)
+        layout.addWidget(install_box)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText(self.t("close"))
+        buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
+        layout.addWidget(buttons)
+        self.pending = ""
+        self.load()
+
+    def reject(self) -> None:
+        if self.task.running():
+            return
+        super().reject()
+
+    def load(self) -> None:
+        fixture = os.environ.get("EUS_KERNEL_FIXTURE")
+        if fixture:
+            try:
+                self.populate(json.loads(Path(fixture).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                self.populate({})
+            return
+        if self.loader is not None:
+            return
+        self.running_label.setText(self.t("k_loading"))
+        self.tree.clear()
+        self.available.clear()
+        self.update_buttons()
+        self.loader = QProcess(self)
+        self.loader.finished.connect(self.loaded)
+        self.loader.errorOccurred.connect(lambda _e: self.loaded(1))
+        command = tool_command("kernels")
+        self.loader.start(command[0], command[1:])
+
+    def loaded(self, exit_code: int, _status=None) -> None:
+        if self.loader is None:
+            return
+        loader, self.loader = self.loader, None
+        try:
+            data = json.loads(bytes(loader.readAllStandardOutput()).decode("utf-8", "replace")) \
+                if exit_code == 0 else {}
+        except ValueError:
+            data = {}
+        loader.deleteLater()
+        self.populate(data)
+
+    def populate(self, data: dict) -> None:
+        self.data = data
+        running = data.get("running") or os.uname().release
+        self.running_label.setText("● " + self.t("kernel_running", release=running))
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        styles = {
+            "running": ("#0F7B4F", "#E9F7EF"), "old": ("#9A5B00", "#FFF6E0"),
+            "newer": ("#1260A8", "#EAF3FD"), "residual": ("#6B7280", "#F3F4F6"),
+        }
+        for kernel in data.get("installed", []):
+            state = kernel.get("state", "")
+            item = QTreeWidgetItem([kernel["release"], self.t(f"k_state_{state}"),
+                                    kernel.get("version", ""), format_bytes(int(kernel.get("size_kb", 0)) * 1024)])
+            item.setData(0, Qt.ItemDataRole.UserRole, kernel)
+            color, background = styles.get(state, ("#202020", "#FFFFFF"))
+            for column in range(4):
+                item.setBackground(column, QBrush(QColor(background)))
+            item.setForeground(1, QBrush(QColor(color)))
+            bold = item.font(1)
+            bold.setBold(True)
+            item.setFont(1, bold)
+            if state == "running":
+                item.setFont(0, bold)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            else:
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(0, Qt.CheckState.Checked if state in {"old", "residual"}
+                                   else Qt.CheckState.Unchecked)
+            self.tree.addTopLevelItem(item)
+        self.tree.blockSignals(False)
+
+        self.available.clear()
+        for kernel in data.get("available", []):
+            if kernel.get("meta"):
+                label = self.t("k_meta", package=kernel["package"])
+            else:
+                label = f"{kernel['package']}   ({kernel.get('version', '')}, {format_bytes(kernel.get('size', 0))})"
+            self.available.addItem(label, kernel)
+        self.headers.setChecked(bool(data.get("headers_installed")))
+        self.available_note.setText("" if self.available.count() else self.t("k_none_available"))
+        self.update_buttons()
+
+    def removable_items(self, only_checked: bool) -> list[dict]:
+        result = []
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            kernel = item.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(kernel, dict) or kernel.get("state") == "running":
+                continue
+            if only_checked and item.checkState(0) != Qt.CheckState.Checked:
+                continue
+            if not only_checked and kernel.get("state") not in {"old", "residual"}:
+                continue
+            result.append(kernel)
+        return result
+
+    def update_buttons(self) -> None:
+        busy = self.task.running() or self.loader is not None
+        self.remove_button.setEnabled(not busy and bool(self.removable_items(True)))
+        self.remove_old_button.setEnabled(not busy and bool(self.removable_items(False)))
+        self.install_button.setEnabled(not busy and self.available.count() > 0)
+        self.refresh_button.setEnabled(not busy)
+
+    def confirm_remove(self, kernels: list[dict]) -> None:
+        if not kernels:
+            QMessageBox.information(self, self.t("kernel_title"), self.t("k_no_old"))
+            return
+        items = "\n".join(f"• {k['release']} — {self.t('k_state_' + k['state'])}" for k in kernels)
+        answer = QMessageBox.question(self, self.t("kernel_title"), self.t("k_confirm_remove", items=items),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.pending = "remove"
+        self.pending_kernels = kernels
+        if self.task.start("kernel-remove", [k["release"] for k in kernels], self.t("working")):
+            self.update_buttons()
+
+    def remove_selected(self) -> None:
+        kernels = self.removable_items(True)
+        if not kernels:
+            QMessageBox.information(self, self.t("kernel_title"), self.t("k_select"))
+            return
+        self.confirm_remove(kernels)
+
+    def remove_old(self) -> None:
+        self.confirm_remove(self.removable_items(False))
+
+    def install_kernel(self) -> None:
+        kernel = self.available.currentData()
+        if not isinstance(kernel, dict):
+            return
+        answer = QMessageBox.question(self, self.t("kernel_title"),
+                                      self.t("k_confirm_install", package=kernel["package"]),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        extra = [kernel["package"]] + (["--headers"] if self.headers.isChecked() else [])
+        self.pending = "install"
+        self.pending_kernels = [kernel]
+        if self.task.start("kernel-install", extra, self.t("working")):
+            self.update_buttons()
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.changed = True
+        kernels = getattr(self, "pending_kernels", [])
+        if self.pending == "install":
+            append_update_history([{"source": "kernel", "name": k["package"], "installed": "—",
+                                    "candidate": k.get("version", "")} for k in kernels], success)
+        else:
+            append_update_history([{"source": "kernel", "name": f"linux-image-{k['release']}",
+                                    "installed": k.get("version", ""), "candidate": "removed"}
+                                   for k in kernels], success)
+        if not success:
+            QMessageBox.critical(self, self.t("kernel_title"), detail)
+        elif self.pending == "install":
+            dialog = QMessageBox(self)
+            dialog.setIcon(QMessageBox.Icon.Information)
+            dialog.setWindowTitle(self.t("kernel_title"))
+            dialog.setText(self.t("k_installed_ok"))
+            restart = dialog.addButton(self.t("restart_now"), QMessageBox.ButtonRole.AcceptRole)
+            dialog.addButton(self.t("restart_later"), QMessageBox.ButtonRole.RejectRole)
+            dialog.exec()
+            if dialog.clickedButton() is restart:
+                self.owner.request_reboot()
+        else:
+            QMessageBox.information(self, self.t("kernel_title"), self.t("k_removed_ok"))
+        self.pending = ""
+        self.load()
+
+
+class KeyFixDialog(QDialog):
+    """Diagnose and repair APT signing keys, keyrings and duplicate repositories."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.scanner: QProcess | None = None
+        self.setWindowTitle(self.t("kf_title"))
+        self.resize(860, 600)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(self.t("kf_title"), objectName="dialogTitle"))
+        intro = QLabel(self.t("kf_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.tabs = QTabWidget()
+        keys_page = QWidget()
+        keys_layout = QVBoxLayout(keys_page)
+        self.keys_tree = self.make_tree()
+        self.keys_note = QLabel(objectName="muted")
+        self.keys_note.setWordWrap(True)
+        keys_buttons = QHBoxLayout()
+        self.fix_keys_button = QPushButton(self.t("kf_fix_keys"), objectName="primaryButton")
+        self.fix_keys_button.clicked.connect(self.fix_keys)
+        keys_buttons.addWidget(self.keys_note, 1)
+        keys_buttons.addWidget(self.fix_keys_button)
+        keys_layout.addWidget(self.keys_tree, 1)
+        keys_layout.addLayout(keys_buttons)
+        self.tabs.addTab(keys_page, self.t("kf_tab_keys"))
+
+        repos_page = QWidget()
+        repos_layout = QVBoxLayout(repos_page)
+        self.repos_tree = self.make_tree()
+        self.repos_note = QLabel(objectName="muted")
+        self.repos_note.setWordWrap(True)
+        repo_buttons = QHBoxLayout()
+        self.fix_dups_button = QPushButton(self.t("kf_fix_dups"), objectName="primaryButton")
+        self.fix_dups_button.clicked.connect(self.fix_duplicates)
+        repo_buttons.addWidget(self.repos_note, 1)
+        repo_buttons.addWidget(self.fix_dups_button)
+        repos_layout.addWidget(self.repos_tree, 1)
+        repos_layout.addLayout(repo_buttons)
+        self.tabs.addTab(repos_page, self.t("kf_tab_repos"))
+        layout.addWidget(self.tabs, 1)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        bottom = QHBoxLayout()
+        self.rescan_button = QPushButton(self.t("kf_rescan"), objectName="secondaryButton")
+        self.rescan_button.clicked.connect(self.scan)
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
+        close.clicked.connect(self.reject)
+        bottom.addWidget(self.rescan_button)
+        bottom.addStretch(1)
+        bottom.addWidget(close)
+        layout.addLayout(bottom)
+        self.pending = ""
+        self.scan()
+
+    def reject(self) -> None:
+        if not self.task.running():
+            super().reject()
+
+    def make_tree(self) -> QTreeWidget:
+        tree = QTreeWidget(objectName="keyTree")
+        tree.setColumnCount(2)
+        tree.setHeaderLabels([self.t("kf_col_item"), self.t("kf_col_problem")])
+        tree.setRootIsDecorated(False)
+        tree.setWordWrap(True)
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        tree.header().setStretchLastSection(True)
+        tree.setColumnWidth(0, 380)
+        return tree
+
+    @staticmethod
+    def add_row(tree: QTreeWidget, item: str, problem: str, severe: bool = True) -> None:
+        row = QTreeWidgetItem([item, problem])
+        row.setToolTip(0, item)
+        row.setToolTip(1, problem)
+        row.setForeground(1, QBrush(QColor("#B42318" if severe else "#9A5B00")))
+        tree.addTopLevelItem(row)
+
+    @staticmethod
+    def add_ok_row(tree: QTreeWidget, text: str) -> None:
+        row = QTreeWidgetItem([text])
+        row.setForeground(0, QBrush(QColor("#0F7B4F")))
+        font = row.font(0)
+        font.setBold(True)
+        row.setFont(0, font)
+        tree.addTopLevelItem(row)
+        row.setFirstColumnSpanned(True)
+
+    def scan(self) -> None:
+        if self.scanner is not None:
+            return
+        self.keys_tree.clear()
+        self.repos_tree.clear()
+        self.keys_note.setText(self.t("kf_scanning"))
+        self.repos_note.setText(self.t("kf_scanning"))
+        self.set_buttons(False)
+        repos = run_tool_json("scan-repos") or {}
+        self.populate_repos(repos)
+        self.scanner = QProcess(self)
+        self.scanner.finished.connect(self.keys_scanned)
+        self.scanner.errorOccurred.connect(lambda _e: self.keys_scanned(1))
+        command = tool_command("scan-keys")
+        self.scanner.start(command[0], command[1:])
+
+    def set_buttons(self, enabled: bool) -> None:
+        for button in (self.fix_keys_button, self.fix_dups_button, self.rescan_button):
+            button.setEnabled(enabled)
+
+    def keys_scanned(self, exit_code: int, _status=None) -> None:
+        if self.scanner is None:
+            return
+        scanner, self.scanner = self.scanner, None
+        try:
+            data = json.loads(bytes(scanner.readAllStandardOutput()).decode("utf-8", "replace")) \
+                if exit_code == 0 else {}
+        except ValueError:
+            data = {}
+        scanner.deleteLater()
+        self.populate_keys(data)
+        self.set_buttons(not self.task.running())
+
+    def populate_keys(self, data: dict) -> None:
+        self.keys_tree.clear()
+        apt = data.get("apt", {})
+        for item in apt.get("unreachable", []):
+            self.add_row(self.keys_tree, item.get("url", ""),
+                         f"{self.t('kf_unreachable')}: {item.get('reason', '')}", severe=False)
+        for item in apt.get("missing_keys", []):
+            self.add_row(self.keys_tree, f"{item['keyid']}  {item.get('url', '')}", self.t("kf_missing"))
+        for item in apt.get("expired_keys", []):
+            self.add_row(self.keys_tree, f"{item['keyid']}  {item.get('url', '')}", self.t("kf_expired"))
+        for url in apt.get("unsigned", []):
+            self.add_row(self.keys_tree, url, self.t("kf_unsigned"))
+        for source in apt.get("signed_by_conflicts", []):
+            self.add_row(self.keys_tree, source, self.t("kf_conflict"))
+        if apt.get("legacy_warning"):
+            self.add_row(self.keys_tree, "/etc/apt/trusted.gpg", self.t("kf_legacy"), severe=False)
+        for path in data.get("missing_signed_by", []):
+            self.add_row(self.keys_tree, path, self.t("kf_missing_file"))
+        for keyring in data.get("files", []):
+            if keyring.get("problems"):
+                self.add_row(self.keys_tree, keyring["path"], "; ".join(keyring["problems"]),
+                             severe="expired" not in " ".join(keyring["problems"]))
+        try:
+            when = format_date(int(APT_UPDATE_LOG.stat().st_mtime))
+            note = self.t("kf_last_update", time=when)
+        except OSError:
+            note = self.t("kf_no_refresh")
+        if self.keys_tree.topLevelItemCount() == 0:
+            self.add_ok_row(self.keys_tree, self.t("kf_ok_keys"))
+        self.keys_note.setText(note)
+
+    def populate_repos(self, data: dict) -> None:
+        self.repos_tree.clear()
+        for duplicate in data.get("duplicates", []):
+            first = f"{duplicate['first_file']}:{duplicate['first_line']}"
+            text = self.t("kf_dup_complete" if duplicate.get("complete") else "kf_dup_partial", first=first)
+            if duplicate.get("signed_by_conflict"):
+                text += " · " + self.t("kf_conflict")
+            item = f"{duplicate['file']}:{duplicate['line']}  {duplicate.get('uri', '')} {duplicate.get('suite', '')}"
+            self.add_row(self.repos_tree, item, text, severe=False)
+        for target in data.get("apt", {}).get("configured_multiple_times", []):
+            if not data.get("duplicates"):
+                self.add_row(self.repos_tree, target, self.t("kf_multiple"), severe=False)
+        count = len(data.get("duplicates", []))
+        if self.repos_tree.topLevelItemCount() == 0:
+            self.add_ok_row(self.repos_tree, self.t("kf_ok_repos"))
+        self.repos_note.setText(", ".join(data.get("files", [])))
+        self.tabs.setTabText(1, self.t("kf_tab_repos") + (f" ({count})" if count else ""))
+
+    def fix_keys(self) -> None:
+        self.pending = "keys"
+        if self.task.start("fix-keys", [], self.t("working")):
+            self.set_buttons(False)
+
+    def fix_duplicates(self) -> None:
+        self.pending = "duplicates"
+        if self.task.start("fix-duplicates", [], self.t("working")):
+            self.set_buttons(False)
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.changed = True
+        if not success:
+            QMessageBox.critical(self, self.t("kf_title"), detail)
+        else:
+            lines = [self.t("kf_done")]
+            try:
+                report = json.loads(REPORT_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report = {}
+            lines += [f"• {action}" for action in report.get("actions", [])]
+            lines += [f"• {fixed['file']}:{fixed['line']}" for fixed in report.get("fixed", [])]
+            remaining = repo_problem_text(self.owner.lang, {"apt": report.get("remaining", {})})
+            problems = report.get("errors", []) + ([remaining] if remaining else [])
+            if problems:
+                lines += ["", self.t("kf_remaining")] + [f"• {problem}" for problem in problems]
+            if report.get("backup"):
+                lines += ["", self.t("kf_backup", path=report["backup"])]
+            QMessageBox.information(self, self.t("kf_title"), "\n".join(lines))
+        self.pending = ""
+        self.set_buttons(True)
+        self.scan()
+
+
+class AddKeyDialog(QDialog):
+    """Install a GPG key manually, optionally together with its repository."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.setWindowTitle(self.t("ak_title"))
+        self.resize(720, 640)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(self.t("ak_title"), objectName="dialogTitle"))
+        intro = QLabel(self.t("ak_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        self.name = QLineEdit()
+        self.name.setPlaceholderText(self.t("ak_name_hint"))
+        form.addRow(self.t("ak_name"), self.name)
+        layout.addLayout(form)
+
+        source_box = QGroupBox(self.t("ak_source"))
+        grid = QGridLayout(source_box)
+        self.source_group = QButtonGroup(self)
+        self.file_radio = QRadioButton(self.t("ak_file"))
+        self.url_radio = QRadioButton(self.t("ak_url"))
+        self.keyserver_radio = QRadioButton(self.t("ak_keyserver"))
+        self.file_edit = QLineEdit()
+        self.file_edit.setPlaceholderText("/home/…/vendor.asc")
+        browse = QPushButton(self.t("ak_browse"), objectName="secondaryButton")
+        browse.clicked.connect(self.browse)
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("https://example.org/key.asc")
+        self.keyserver_edit = QLineEdit()
+        self.keyserver_edit.setPlaceholderText("0x0123456789ABCDEF")
+        for row, (radio, edit) in enumerate(((self.file_radio, self.file_edit),
+                                             (self.url_radio, self.url_edit),
+                                             (self.keyserver_radio, self.keyserver_edit))):
+            self.source_group.addButton(radio, row)
+            grid.addWidget(radio, row, 0)
+            grid.addWidget(edit, row, 1)
+            edit.textChanged.connect(lambda _text, r=radio: r.setChecked(True))
+        grid.addWidget(browse, 0, 2)
+        self.file_radio.setChecked(True)
+        self.key_info = QLabel(objectName="muted")
+        self.key_info.setWordWrap(True)
+        grid.addWidget(self.key_info, 3, 0, 1, 3)
+        layout.addWidget(source_box)
+
+        self.repo_box = QGroupBox(self.t("ak_repo"))
+        self.repo_box.setCheckable(True)
+        self.repo_box.setChecked(False)
+        repo_form = QFormLayout(self.repo_box)
+        self.repo_uri = QLineEdit()
+        self.repo_uri.setPlaceholderText("https://repo.example.org/debian")
+        self.suite = QLineEdit()
+        self.suite.setPlaceholderText("stable / trixie")
+        self.components = QLineEdit("main")
+        self.arch = QLineEdit()
+        self.arch.setPlaceholderText(f"amd64 ({self.t('ak_optional')})")
+        self.deb_src = QCheckBox(self.t("ak_source_pkgs"))
+        repo_form.addRow(self.t("ak_repo_uri"), self.repo_uri)
+        repo_form.addRow(self.t("ak_suite"), self.suite)
+        repo_form.addRow(self.t("ak_components"), self.components)
+        repo_form.addRow(self.t("ak_arch"), self.arch)
+        repo_form.addRow("", self.deb_src)
+        layout.addWidget(self.repo_box)
+
+        layout.addWidget(QLabel(self.t("ak_preview"), objectName="detailsTitle"))
+        self.preview = QPlainTextEdit(objectName="preview")
+        self.preview.setReadOnly(True)
+        self.preview.setFont(mono_font())
+        self.preview.setMaximumHeight(120)
+        layout.addWidget(self.preview)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        buttons = QHBoxLayout()
+        self.add_button = QPushButton(self.t("ak_add"), objectName="primaryButton")
+        self.add_button.clicked.connect(self.submit)
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
+        close.clicked.connect(self.reject)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self.add_button)
+        layout.addLayout(buttons)
+
+        for widget in (self.name, self.repo_uri, self.suite, self.components, self.arch):
+            widget.textChanged.connect(self.update_preview)
+        self.repo_box.toggled.connect(self.update_preview)
+        self.deb_src.toggled.connect(self.update_preview)
+        self.file_edit.editingFinished.connect(self.inspect_file)
+        self.update_preview()
+
+    def reject(self) -> None:
+        if not self.task.running():
+            super().reject()
+
+    def clean_name(self) -> str:
+        name = self.name.text().strip().lower()
+        return name[:-4] if name.endswith((".gpg", ".asc")) else name
+
+    def browse(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, self.t("ak_select_file"), str(Path.home()),
+            "OpenPGP keys (*.asc *.gpg *.pgp *.key *.pub);;All files (*)")
+        if path:
+            self.file_edit.setText(path)
+            self.file_radio.setChecked(True)
+            if not self.name.text().strip():
+                guess = re.sub(r"[^a-z0-9._-]+", "-", Path(path).stem.lower()).strip("-.")
+                guess = re.sub(r"[-.](archive-)?(keyring|key|pub|public|signing)$", "", guess) or guess
+                self.name.setText(guess[:60])
+            self.inspect_file()
+
+    def inspect_file(self) -> None:
+        path = self.file_edit.text().strip()
+        if not path:
+            self.key_info.clear()
+            return
+        keys = run_tool_json("show-key", path)
+        if isinstance(keys, list) and keys:
+            self.key_info.setText("\n".join(self.t("ak_key_info", uid=k.get("uid") or "?",
+                                                   keyid=k.get("keyid", "")) for k in keys))
+        else:
+            self.key_info.setText("⚠ " + translate("en", "ak_missing_source")
+                                  if not Path(path).is_file() else "⚠ OpenPGP?")
+
+    def stanza(self) -> str:
+        lines = ["Types: deb" + (" deb-src" if self.deb_src.isChecked() else ""),
+                 f"URIs: {self.repo_uri.text().strip()}", f"Suites: {self.suite.text().strip()}"]
+        if self.components.text().strip():
+            lines.append(f"Components: {' '.join(self.components.text().split())}")
+        if self.arch.text().strip():
+            lines.append(f"Architectures: {' '.join(self.arch.text().split())}")
+        lines.append(f"Signed-By: /etc/apt/keyrings/{self.clean_name() or '<name>'}.gpg")
+        return "\n".join(lines)
+
+    def update_preview(self) -> None:
+        name = self.clean_name() or "<name>"
+        if self.repo_box.isChecked():
+            self.preview.setPlainText(self.t("ak_preview_repo", name=name, stanza=self.stanza()))
+        else:
+            self.preview.setPlainText(self.t("ak_preview_key", name=name))
+
+    def submit(self) -> None:
+        name = self.clean_name()
+        if not NAME_PATTERN.match(name):
+            QMessageBox.warning(self, self.t("ak_title"), self.t("ak_invalid_name"))
+            return
+        args = ["--name", name]
+        if self.file_radio.isChecked() and self.file_edit.text().strip():
+            args += ["--file", str(Path(self.file_edit.text().strip()).expanduser().absolute())]
+        elif self.url_radio.isChecked() and self.url_edit.text().strip().startswith("https://"):
+            args += ["--url", self.url_edit.text().strip()]
+        elif self.keyserver_radio.isChecked() and re.fullmatch(
+                r"(0x)?([0-9A-Fa-f]{8}|[0-9A-Fa-f]{16}|[0-9A-Fa-f]{40})", self.keyserver_edit.text().strip()):
+            args += ["--keyserver", self.keyserver_edit.text().strip()]
+        else:
+            QMessageBox.warning(self, self.t("ak_title"), self.t("ak_missing_source"))
+            return
+        if self.repo_box.isChecked():
+            uri, suite = self.repo_uri.text().strip(), self.suite.text().strip()
+            components = " ".join(self.components.text().split())
+            if not re.match(r"^(https?|ftp|file)://\S+$", uri) or not suite or \
+                    (not components and not suite.endswith("/")):
+                QMessageBox.warning(self, self.t("ak_title"), self.t("ak_invalid_repo"))
+                return
+            args += ["--repo-uri", uri, "--suite", suite]
+            if components:
+                args += ["--components", components]
+            if self.arch.text().strip():
+                args += ["--arch", " ".join(self.arch.text().split())]
+            if self.deb_src.isChecked():
+                args += ["--with-source", "yes"]
+        if self.task.start("add-key", args, self.t("working")):
+            self.add_button.setEnabled(False)
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.add_button.setEnabled(True)
+        if not success:
+            QMessageBox.critical(self, self.t("ak_title"), detail)
+            return
+        self.changed = True
+        try:
+            report = json.loads(REPORT_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+        lines = [self.t("ak_added"), ""]
+        lines += [f"• {k.get('uid', '')} ({k.get('keyid', '')})" for k in report.get("keys", [])]
+        lines += [f"• {action}" for action in report.get("actions", [])]
+        lines += [f"⚠ {warning}" for warning in report.get("warnings", [])]
+        QMessageBox.information(self, self.t("ak_title"), "\n".join(lines))
+        self.accept()
+
+
+class SettingsDialog(QDialog):
+    """Schedule, pause and notification settings."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.schedule = read_schedule()
+        self.setWindowTitle(self.t("settings_title"))
+        self.setMinimumWidth(660)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(self.t("settings_title"), objectName="dialogTitle"))
+
+        schedule_box = QGroupBox(self.t("st_schedule"))
+        grid = QGridLayout(schedule_box)
+        self.interval_radio = QRadioButton(self.t("st_every"))
+        self.daily_radio = QRadioButton(self.t("st_daily"))
+        self.interval = QComboBox()
+        for hours in INTERVAL_CHOICES:
+            self.interval.addItem(self.t("st_week") if hours == 168 else self.t("hours", hours=hours), hours)
+        self.interval.setCurrentIndex(max(0, self.interval.findData(self.schedule["hours"])))
+        self.daily_time = QTimeEdit()
+        self.daily_time.setDisplayFormat("HH:mm")
+        self.daily_time.setTime(QTime.fromString(self.schedule["daily"], "HH:mm"))
+        grid.addWidget(self.interval_radio, 0, 0)
+        grid.addWidget(self.interval, 0, 1)
+        grid.addWidget(self.daily_radio, 1, 0)
+        grid.addWidget(self.daily_time, 1, 1)
+        grid.setColumnStretch(2, 1)
+        (self.daily_radio if self.schedule["mode"] == "daily" else self.interval_radio).setChecked(True)
+        self.interval.activated.connect(lambda _i: self.interval_radio.setChecked(True))
+        self.daily_time.timeChanged.connect(lambda _t: self.daily_radio.setChecked(True))
+        layout.addWidget(schedule_box)
+
+        pause_box = QGroupBox(self.t("st_pause"))
+        pause_layout = QVBoxLayout(pause_box)
+        self.pause_status = QLabel(objectName="pauseStatus")
+        pause_row = QHBoxLayout()
+        self.pause_days = QSpinBox()
+        self.pause_days.setRange(1, 365)
+        self.pause_days.setValue(7)
+        self.pause_days.setSuffix(" " + self.t("st_days"))
+        self.pause_button = QPushButton(self.t("st_pause_button"), objectName="secondaryButton")
+        self.resume_button = QPushButton(self.t("st_resume_button"), objectName="secondaryButton")
+        self.pause_button.clicked.connect(lambda: self.set_pause(self.pause_days.value()))
+        self.resume_button.clicked.connect(lambda: self.set_pause(0))
+        pause_row.addWidget(QLabel(self.t("st_pause_for")))
+        pause_row.addWidget(self.pause_days)
+        for days in (1, 3, 7, 14, 30):
+            quick = QPushButton(str(days), objectName="chipButton")
+            quick.setFixedWidth(38)
+            quick.clicked.connect(lambda _c=False, d=days: self.pause_days.setValue(d))
+            pause_row.addWidget(quick)
+        pause_row.addStretch(1)
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        action_row.addWidget(self.resume_button)
+        action_row.addWidget(self.pause_button)
+        note = QLabel(self.t("st_pause_note"), objectName="muted")
+        note.setWordWrap(True)
+        pause_layout.addWidget(self.pause_status)
+        pause_layout.addLayout(pause_row)
+        pause_layout.addWidget(note)
+        pause_layout.addLayout(action_row)
+        layout.addWidget(pause_box)
+
+        notify_box = QGroupBox(self.t("st_general"))
+        notify_layout = QVBoxLayout(notify_box)
+        self.notify = QCheckBox(self.t("notifications"))
+        self.notify.setChecked(owner.notifier_enabled())
+        notify_layout.addWidget(self.notify)
+        layout.addWidget(notify_box)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText(self.t("save"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(self.t("cancel"))
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        self.buttons = buttons
+        style_button_box(buttons)
+        layout.addWidget(buttons)
+        self.after_task = ""
+        self.update_pause_status()
+
+    def reject(self) -> None:
+        if not self.task.running():
+            super().reject()
+
+    def update_pause_status(self) -> None:
+        until = paused_until()
+        if until:
+            self.pause_status.setText(self.t("st_paused_until", date=format_date(until)))
+            self.pause_status.setProperty("paused", True)
+        else:
+            self.pause_status.setText(self.t("st_not_paused"))
+            self.pause_status.setProperty("paused", False)
+        self.pause_status.style().unpolish(self.pause_status)
+        self.pause_status.style().polish(self.pause_status)
+        self.resume_button.setEnabled(bool(until) and not self.task.running())
+        self.pause_button.setEnabled(not self.task.running())
+
+    def set_pause(self, days: int) -> None:
+        self.after_task = "pause"
+        if self.task.start("pause", [str(days)], self.t("working")):
+            self.update_pause_status()
+
+    def save(self) -> None:
+        self.owner.set_notifier_enabled(self.notify.isChecked())
+        if self.daily_radio.isChecked():
+            new = ("daily", self.daily_time.time().toString("HH:mm"))
+            old = ("daily", self.schedule["daily"]) if self.schedule["mode"] == "daily" else None
+        else:
+            new = ("interval", str(self.interval.currentData()))
+            old = ("interval", str(self.schedule["hours"])) if self.schedule["mode"] == "interval" else None
+        if new == old:
+            self.accept()
+            return
+        self.after_task = "schedule"
+        if self.task.start("set-schedule", list(new), self.owner.t("saving")):
+            self.buttons.setEnabled(False)
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.changed = True
+        self.buttons.setEnabled(True)
+        self.update_pause_status()
+        if not success:
+            QMessageBox.critical(self, self.t("settings_title"), detail)
+            return
+        if self.after_task == "schedule":
+            self.accept()
 
 
 class UpdateWindow(QMainWindow):
@@ -541,27 +1781,38 @@ class UpdateWindow(QMainWindow):
         self.pending_commands: list[dict] = []
         self.process_buffer = ""
         self.operation_kind = ""
+        self.operation_started = 0.0
         self.install_had_kernel = False
         self.process_was_timed_out = False
+        self.external_busy = False
+        self.kernel_probe: QProcess | None = None
         self.process_timeout = QTimer(self)
         self.process_timeout.setSingleShot(True)
         self.process_timeout.timeout.connect(self.stop_stalled_process)
         self.progress_animation = QTimer(self)
         self.progress_animation.setInterval(650)
         self.progress_animation.timeout.connect(self.advance_row_progress)
+        self.reload_timer = QTimer(self)
+        self.reload_timer.setSingleShot(True)
+        self.reload_timer.setInterval(1500)
+        self.reload_timer.timeout.connect(self.reload_from_disk)
         self.setWindowTitle("Eduka-Update-System")
         self.setWindowIcon(QIcon(EUS_APP_ICON))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.resize(780, 560)
-        self.setMinimumSize(640, 460)
+        self.resize(920, 740)
+        self.setMinimumSize(700, 520)
+        self.build_menu()
         self.build_ui()
         self.apply_style()
         self.setup_window_shortcuts()
+        self.setup_watcher()
         self.load_updates()
+        self.refresh_banners()
 
     def t(self, key: str, **values) -> str:
-        return self.msg[key].format(**values)
+        return translate(self.lang, key, **values)
 
+    # ------------------------------------------------------------------ UI
     def setup_window_shortcuts(self) -> None:
         self.fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
         self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
@@ -577,6 +1828,64 @@ class UpdateWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
 
+    def build_menu(self) -> None:
+        bar = self.menuBar()
+        bar.setObjectName("mainMenu")
+        updates = bar.addMenu(self.t("menu_updates"))
+        self.check_action = QAction(self.t("check_updates"), self)
+        self.check_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.check_action.triggered.connect(self.check_updates)
+        self.install_action = QAction(self.t("install"), self)
+        self.install_action.setShortcut(QKeySequence("Ctrl+I"))
+        self.install_action.triggered.connect(self.install_updates)
+        self.select_action = QAction(self.t("action_select_all"), self)
+        self.select_action.setShortcut(QKeySequence("Ctrl+A"))
+        self.select_action.triggered.connect(lambda: self.select_all.setChecked(True))
+        self.history_action = QAction(self.t("history"), self)
+        self.history_action.setShortcut(QKeySequence("Ctrl+H"))
+        self.history_action.triggered.connect(self.show_history)
+        quit_action = QAction(self.t("action_quit"), self)
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self.close)
+        for action in (self.check_action, self.install_action, self.select_action):
+            updates.addAction(action)
+        updates.addSeparator()
+        updates.addAction(self.history_action)
+        updates.addSeparator()
+        updates.addAction(quit_action)
+        # Kernel, Key Fix, Add Key and Settings open their dialog directly on click.
+        self.kernel_action = bar.addAction(self.t("menu_kernel"))
+        self.kernel_action.triggered.connect(self.show_kernels)
+        self.keyfix_action = bar.addAction(self.t("menu_keyfix"))
+        self.keyfix_action.triggered.connect(self.show_key_fix)
+        self.addkey_action = bar.addAction(self.t("menu_addkey"))
+        self.addkey_action.triggered.connect(self.show_add_key)
+        self.settings_action = bar.addAction(self.t("menu_settings"))
+        self.settings_action.triggered.connect(self.show_settings)
+        help_menu = bar.addMenu(self.t("menu_help"))
+        log_action = QAction(self.t("action_log"), self)
+        log_action.triggered.connect(self.show_log)
+        about_action = QAction(self.t("about"), self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(log_action)
+        help_menu.addAction(about_action)
+        self.busy_actions = [self.check_action, self.install_action, self.history_action,
+                             self.kernel_action, self.keyfix_action, self.addkey_action,
+                             self.settings_action]
+
+    def make_banner(self, kind: str, button_text: str, handler) -> tuple[QFrame, QLabel, QPushButton]:
+        frame = QFrame(objectName=f"banner_{kind}")
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(12, 7, 8, 7)
+        label = QLabel(objectName="bannerText")
+        label.setWordWrap(True)
+        button = QPushButton(button_text, objectName="bannerButton")
+        button.clicked.connect(handler)
+        row.addWidget(label, 1)
+        row.addWidget(button)
+        frame.hide()
+        return frame, label, button
+
     def build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -586,36 +1895,67 @@ class UpdateWindow(QMainWindow):
 
         header = QFrame(objectName="header")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(16, 9, 16, 9)
-        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(18, 12, 18, 12)
+        header_layout.setSpacing(12)
         icon = QLabel()
-        icon.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(36, 36)))
+        icon.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(42, 42)))
         header_layout.addWidget(icon)
         title_box = QVBoxLayout()
-        title_box.setSpacing(0)
+        title_box.setSpacing(1)
         title_box.addWidget(QLabel("Eduka-Update-System", objectName="appTitle"))
         title_box.addWidget(QLabel(self.t("subtitle"), objectName="subtitle"))
         header_layout.addLayout(title_box, 1)
+        header_layout.addWidget(QLabel(f"v{self.version}", objectName="versionChip"))
         outer.addWidget(header)
 
         body = QWidget(objectName="body")
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(14, 11, 14, 11)
-        body_layout.setSpacing(8)
+        body_layout.setContentsMargins(16, 12, 16, 12)
+        body_layout.setSpacing(9)
 
-        status_row = QHBoxLayout()
+        self.pause_banner, self.pause_label, _ = self.make_banner("pause", self.t("resume"), self.resume_updates)
+        self.repo_banner, self.repo_label, _ = self.make_banner("repo", self.t("open_keyfix"), self.show_key_fix)
+        self.kernel_banner, self.kernel_label, _ = self.make_banner("kernel", self.t("open_kernel"),
+                                                                    self.show_kernels)
+        self.restart_banner, self.restart_label, _ = self.make_banner("restart", self.t("restart_now"),
+                                                                      self.confirm_reboot)
+        for banner in (self.restart_banner, self.repo_banner, self.pause_banner, self.kernel_banner):
+            body_layout.addWidget(banner)
+
+        status_card = QFrame(objectName="statusCard")
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(14, 10, 14, 10)
         status_column = QVBoxLayout()
         status_column.setSpacing(2)
         self.status_title = QLabel(objectName="statusTitle")
+        self.status_title.setWordWrap(True)
         self.last_checked = QLabel(objectName="muted")
+        self.schedule_label = QLabel(objectName="muted")
+        status_column.addWidget(self.status_title)
+        status_column.addWidget(self.last_checked)
+        status_column.addWidget(self.schedule_label)
+        status_layout.addLayout(status_column, 1)
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        self.chips: dict[str, QLabel] = {}
+        for category in CATEGORY_ORDER:
+            chip = QLabel(objectName=f"chip_{category}")
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chips.addWidget(chip)
+            self.chips[category] = chip
+        status_layout.addLayout(chips)
+        body_layout.addWidget(status_card)
+
+        self.global_progress = QProgressBar(objectName="globalProgress")
+        self.global_progress.setRange(0, 0)
+        self.global_progress.setTextVisible(False)
+        self.global_progress.setFixedHeight(4)
+        self.global_progress.hide()
         self.progress_detail = QLabel(objectName="progressDetail")
         self.progress_detail.setWordWrap(True)
         self.progress_detail.hide()
-        status_column.addWidget(self.status_title)
-        status_column.addWidget(self.last_checked)
-        status_column.addWidget(self.progress_detail)
-        status_row.addLayout(status_column, 1)
-        body_layout.addLayout(status_row)
+        body_layout.addWidget(self.global_progress)
+        body_layout.addWidget(self.progress_detail)
 
         self.tree = QTreeWidget(objectName="updatesTree")
         self.tree.setColumnCount(5)
@@ -624,110 +1964,226 @@ class UpdateWindow(QMainWindow):
         self.tree.setRootIsDecorated(True)
         self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(False)
-        self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.tree.setMinimumHeight(150)
         header_view = self.tree.header()
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        for column in (1, 2, 3):
+            header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tree.setColumnWidth(4, 154)
         self.tree.itemChanged.connect(self.selection_changed)
         self.tree.currentItemChanged.connect(self.show_description)
-        body_layout.addWidget(self.tree, 1)
 
-        selection_row = QHBoxLayout()
+        details = QFrame(objectName="detailsBox")
+        details_layout = QVBoxLayout(details)
+        details_layout.setContentsMargins(12, 9, 12, 10)
+        details_layout.setSpacing(5)
+        details_layout.addWidget(QLabel(self.t("details"), objectName="detailsTitle"))
+        self.description = QLabel(self.t("choose"))
+        self.description.setTextFormat(Qt.TextFormat.RichText)
+        self.description.setWordWrap(True)
+        self.description.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.description.setMinimumHeight(62)
+        details_layout.addWidget(self.description, 1)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self.tree)
+        splitter.addWidget(details)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([300, 150])
+        body_layout.addWidget(splitter, 1)
+
+        actions = QHBoxLayout()
         self.select_all = QCheckBox(self.t("select_all"))
         self.select_all.setChecked(True)
         self.select_all.stateChanged.connect(self.toggle_all)
         self.selection_label = QLabel(objectName="selectionLabel")
-        selection_row.addWidget(self.select_all)
-        selection_row.addWidget(self.selection_label, 1)
-        body_layout.addLayout(selection_row)
-
-        details = QFrame(objectName="detailsBox")
-        details_layout = QVBoxLayout(details)
-        details_layout.setContentsMargins(10, 8, 10, 9)
-        details_layout.setSpacing(5)
-        details_title = QLabel(self.t("details"), objectName="detailsTitle")
-        details_layout.addWidget(details_title)
-        self.description = QLabel(self.t("choose"))
-        self.description.setTextFormat(Qt.TextFormat.RichText)
-        self.description.setWordWrap(True)
-        self.description.setMinimumHeight(62)
-        details_layout.addWidget(self.description)
-        body_layout.addWidget(details)
-
-        actions = QHBoxLayout()
-        self.about_button = QPushButton(self.t("about"), objectName="secondaryButton")
-        self.settings_button = QPushButton(self.t("settings"), objectName="secondaryButton")
         self.history_button = QPushButton(self.t("history"), objectName="secondaryButton")
         self.check_button = QPushButton(self.t("check_updates"), objectName="secondaryButton")
         self.install_button = QPushButton(self.t("install"), objectName="primaryButton")
-        self.close_button = QPushButton(self.t("close"), objectName="secondaryButton")
-        self.about_button.clicked.connect(self.show_about)
-        self.settings_button.clicked.connect(self.show_settings)
         self.history_button.clicked.connect(self.show_history)
         self.check_button.clicked.connect(self.check_updates)
         self.install_button.clicked.connect(self.install_updates)
-        self.close_button.clicked.connect(self.close)
-        actions.addWidget(self.about_button)
-        actions.addWidget(self.settings_button)
+        actions.addWidget(self.select_all)
+        actions.addWidget(self.selection_label, 1)
         actions.addWidget(self.history_button)
-        actions.addStretch(1)
         actions.addWidget(self.check_button)
         actions.addWidget(self.install_button)
-        actions.addWidget(self.close_button)
         body_layout.addLayout(actions)
         outer.addWidget(body, 1)
 
     def apply_style(self) -> None:
         self.setStyleSheet(
             """
-            QMainWindow, QWidget#body { background: #F3F3F3; color: #202020; }
-            QFrame#header { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #F5F7F6); border-bottom: 1px solid #C9CECC; }
-            QLabel#appTitle { color: #202020; font-size: 15px; font-weight: 600; }
-            QLabel#subtitle { color: #686868; font-size: 10px; }
-            QLabel#statusTitle { color: #202020; font-size: 13px; font-weight: 600; }
-            QLabel#muted { color: #747474; font-size: 10px; }
-            QLabel#progressDetail { color: #505050; font-size: 10px; }
-            QLabel#selectionLabel { color: #444444; }
-            QTreeWidget#updatesTree { background: #FFFFFF; border: 1px solid #C7CBC9;
-                border-radius: 3px; outline: 0; font-size: 11px; }
-            QTreeWidget#updatesTree::item { min-height: 30px; border-bottom: 1px solid #E8E8E8; }
-            QTreeWidget#updatesTree::item:selected { background: #D9E8E3; color: #202020; }
-            QHeaderView::section { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FAFAFA, stop:1 #E5E7E6); color: #333333; border: 0;
-                border-right: 1px solid #D2D2D2; border-bottom: 1px solid #C8C8C8;
-                padding: 5px 7px; font-weight: 600; }
-            QFrame#detailsBox { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #FAFBFA); border: 1px solid #C7CBC9; border-radius: 3px; }
-            QLabel#detailsTitle { color: #242424; font-weight: 600; border: 0; }
-            QPushButton { min-height: 29px; padding: 0 11px; border-radius: 3px; }
-            QPushButton#secondaryButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #ECEEED); color: #252525; border: 1px solid #B8BCBA; }
-            QPushButton#secondaryButton:hover { border-color: #8F9692; }
-            QPushButton#secondaryButton:pressed { background: #E2E5E3; padding-top: 1px; }
-            QPushButton#primaryButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #2B8A66, stop:1 #1F7254); color: #FFFFFF; border: 1px solid #185E44; }
-            QPushButton#primaryButton:hover { background: #1C684C; }
-            QPushButton#primaryButton:pressed { background: #185C44; padding-top: 1px; }
-            QPushButton#primaryButton:disabled { background: #B8C9C2; border-color: #A9BBB4; }
+            QMainWindow, QWidget#body { background: #F4F6F5; color: #1F2933; }
+            QMenuBar#mainMenu { background: #FFFFFF; border-bottom: 1px solid #DDE3E0; padding: 2px 6px; }
+            QMenuBar#mainMenu::item { padding: 5px 11px; border-radius: 4px; color: #1F2933; }
+            QMenuBar#mainMenu::item:selected { background: #E3F1EA; color: #0F5C3F; }
+            QMenu { background: #FFFFFF; border: 1px solid #CBD5D0; padding: 4px; }
+            QMenu::item { padding: 6px 22px; border-radius: 3px; }
+            QMenu::item:selected { background: #E3F1EA; color: #0F5C3F; }
+            QFrame#header { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #0F6B4A, stop:1 #1F8F63); border: 0; }
+            QLabel#appTitle { color: #FFFFFF; font-size: 17px; font-weight: 700; }
+            QLabel#subtitle { color: #D7F0E4; font-size: 11px; }
+            QLabel#versionChip { color: #0F5C3F; background: #E8F7EF; border-radius: 9px;
+                padding: 2px 10px; font-weight: 600; }
+            QFrame#statusCard { background: #FFFFFF; border: 1px solid #DDE3E0; border-radius: 8px; }
+            QLabel#statusTitle { color: #111827; font-size: 15px; font-weight: 700; }
+            QLabel#muted { color: #6B7280; font-size: 11px; }
+            QLabel#progressDetail { color: #374151; font-size: 11px; }
+            QLabel#selectionLabel { color: #374151; }
+            QLabel#chip_critical, QLabel#chip_medium, QLabel#chip_normal, QLabel#chip_flatpak {
+                border-radius: 11px; padding: 4px 10px; font-weight: 600; font-size: 11px; }
+            QLabel#chip_critical { background: #FEE4E2; color: #912018; }
+            QLabel#chip_medium { background: #FEF0C7; color: #7A4D00; }
+            QLabel#chip_normal { background: #D1FADF; color: #05603A; }
+            QLabel#chip_flatpak { background: #D1E9FF; color: #194185; }
+            QFrame#banner_pause { background: #FFFAEB; border: 1px solid #FEC84B; border-radius: 6px; }
+            QFrame#banner_repo { background: #FEF3F2; border: 1px solid #FDA29B; border-radius: 6px; }
+            QFrame#banner_kernel { background: #EFF8FF; border: 1px solid #84CAFF; border-radius: 6px; }
+            QFrame#banner_restart { background: #FFF6ED; border: 1px solid #F7B27A; border-radius: 6px; }
+            QPushButton#bannerButton { background: #FFFFFF; border: 1px solid #B8C2BE; border-radius: 4px;
+                padding: 0 10px; min-height: 26px; }
+            QPushButton#bannerButton:hover { border-color: #6B7280; }
+            QTreeWidget#updatesTree, QTreeWidget#kernelTree, QTreeWidget#keyTree { background: #FFFFFF;
+                border: 1px solid #D0D7D3; border-radius: 6px; outline: 0; font-size: 11px; }
+            QTreeWidget#updatesTree::item, QTreeWidget#kernelTree::item { min-height: 30px; }
+            QTreeWidget#keyTree::item { min-height: 26px; }
+            QTreeWidget::item:selected { background: #D3EBDF; color: #111827; }
+            QHeaderView::section { background: #F1F4F2; color: #374151; border: 0;
+                border-right: 1px solid #E1E6E3; border-bottom: 1px solid #D0D7D3;
+                padding: 6px 8px; font-weight: 600; }
+            QFrame#detailsBox { background: #FFFFFF; border: 1px solid #D0D7D3; border-radius: 6px; }
+            QLabel#detailsTitle { color: #111827; font-weight: 700; border: 0; }
+            QLabel#dialogTitle { color: #0F5C3F; font-size: 16px; font-weight: 700; }
+            QLabel#runningKernel { color: #0F7B4F; font-weight: 700; font-size: 13px; }
+            QLabel#pauseStatus { font-weight: 600; color: #05603A; }
+            QLabel#pauseStatus[paused="true"] { color: #93370D; }
+            QGroupBox { font-weight: 700; border: 1px solid #D0D7D3; border-radius: 6px;
+                margin-top: 10px; padding: 10px 8px 8px 8px; background: #FFFFFF; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1F2933; }
+            QPushButton { min-height: 30px; padding: 0 13px; border-radius: 5px; }
+            QPushButton#secondaryButton, QPushButton#chipButton { background: #FFFFFF; color: #1F2933;
+                border: 1px solid #B8C2BE; }
+            QPushButton#secondaryButton:hover, QPushButton#chipButton:hover { border-color: #6B7280;
+                background: #F9FAFB; }
+            QPushButton#secondaryButton:disabled { color: #9CA3AF; border-color: #D1D5DB; }
+            QPushButton#chipButton { min-height: 26px; padding: 0; }
+            QPushButton#primaryButton { background: #157A55; color: #FFFFFF; border: 1px solid #0F5C3F;
+                font-weight: 600; }
+            QPushButton#primaryButton:hover { background: #10684A; }
+            QPushButton#primaryButton:pressed { background: #0D573D; }
+            QPushButton#primaryButton:disabled { background: #B8CEC5; border-color: #A9BFB6; }
+            QPushButton#dangerButton { background: #FFFFFF; color: #B42318; border: 1px solid #F04438;
+                font-weight: 600; }
+            QPushButton#dangerButton:hover { background: #FEF3F2; }
+            QPushButton#dangerButton:disabled { color: #F5A9A2; border-color: #F8C7C2; }
             QWidget#rowProgressContainer { background: transparent; }
             QProgressBar#rowProgress { border: 1px solid #9DB5AA; border-radius: 4px;
                 background: #E7EEEA; color: #173E2F; text-align: center;
                 font-size: 9px; font-weight: 600; min-height: 14px; max-height: 14px; }
             QProgressBar#rowProgress::chunk { background: #199B61; border-radius: 2px; }
-            QDialog { background: #F3F3F3; }
-            QComboBox { min-height: 27px; padding: 0 6px; border: 1px solid #BDBDBD;
-                border-radius: 3px; background: #FFFFFF; }
+            QProgressBar#globalProgress { border: 0; background: #DDE8E2; border-radius: 2px; }
+            QProgressBar#globalProgress::chunk { background: #157A55; border-radius: 2px; }
+            QProgressBar#taskProgress { border: 1px solid #9DB5AA; border-radius: 5px; background: #E7EEEA;
+                text-align: center; min-height: 16px; }
+            QProgressBar#taskProgress::chunk { background: #199B61; border-radius: 4px; }
+            QDialog { background: #F4F6F5; }
+            QLineEdit, QComboBox { min-height: 28px; padding: 0 7px;
+                border: 1px solid #C3CCC7; border-radius: 4px; background: #FFFFFF; }
+            QLineEdit:focus, QComboBox:focus { border-color: #157A55; }
+            QSpinBox, QTimeEdit { min-height: 28px; min-width: 96px; }
+            QLabel#bannerText { color: #1F2933; font-weight: 600; }
+            QPlainTextEdit { border: 1px solid #C3CCC7; border-radius: 4px; background: #FFFFFF; }
+            QTabWidget::pane { border: 1px solid #D0D7D3; border-radius: 6px; background: #FFFFFF; top: -1px; }
+            QTabBar::tab { background: #E9EEEB; border: 1px solid #D0D7D3; padding: 6px 14px;
+                border-top-left-radius: 5px; border-top-right-radius: 5px; margin-right: 2px; }
+            QTabBar::tab:selected { background: #FFFFFF; border-bottom-color: #FFFFFF; font-weight: 600; }
             """
         )
 
+    def setup_watcher(self) -> None:
+        """Reload when a background refresh (timer or new repository) changes the state."""
+        self.watcher = QFileSystemWatcher(self)
+        for path in (STATE_FILE.parent, PAUSE_FILE.parent):
+            if path.is_dir():
+                self.watcher.addPath(str(path))
+        self.watcher.directoryChanged.connect(lambda _p: self.reload_timer.start())
+
+    def reload_from_disk(self) -> None:
+        if self.is_busy():
+            return
+        self.load_updates()
+        self.refresh_banners()
+
+    # ------------------------------------------------------------- banners
+    def refresh_banners(self) -> None:
+        until = paused_until()
+        self.pause_label.setText(self.t("banner_paused", date=format_date(until)))
+        self.pause_banner.setVisible(bool(until))
+
+        problems = repo_problem_text(self.lang, run_tool_json("scan-repos", timeout=8))
+        self.repo_label.setText(self.t("banner_repo", details=problems))
+        self.repo_banner.setVisible(bool(problems))
+
+        restart = restart_is_required(self.read_state())
+        self.restart_label.setText(self.t("restart_pending"))
+        self.restart_banner.setVisible(restart)
+
+        schedule = read_schedule()
+        if schedule["mode"] == "daily":
+            text = self.t("schedule_daily", time=schedule["daily"])
+        elif schedule["hours"] == 168:
+            text = self.t("schedule_week")
+        else:
+            text = self.t("schedule_interval", hours=schedule["hours"])
+        self.schedule_label.setText(self.t("next_check", schedule=text))
+        self.probe_kernels()
+
+    def probe_kernels(self) -> None:
+        fixture = os.environ.get("EUS_KERNEL_FIXTURE")
+        if fixture:
+            try:
+                data = json.loads(Path(fixture).read_text(encoding="utf-8"))
+                self.show_kernel_banner(int(data.get("old_count", 0)))
+            except (OSError, ValueError):
+                pass
+            return
+        if self.kernel_probe is not None:
+            return
+        self.kernel_probe = QProcess(self)
+
+        def done(exit_code: int, _status=None) -> None:
+            probe, self.kernel_probe = self.kernel_probe, None
+            if probe is None:
+                return
+            output = bytes(probe.readAllStandardOutput()).decode("utf-8", "replace")
+            probe.deleteLater()
+            if exit_code == 0:
+                self.show_kernel_banner(len([line for line in output.splitlines() if line.strip()]))
+
+        self.kernel_probe.finished.connect(done)
+        self.kernel_probe.errorOccurred.connect(lambda _e: done(1))
+        command = tool_command("kernels", "--format", "old")
+        self.kernel_probe.start(command[0], command[1:])
+
+    def show_kernel_banner(self, count: int) -> None:
+        self.kernel_label.setText(self.t("banner_kernel", count=count))
+        self.kernel_banner.setVisible(count > 0)
+
+    def resume_updates(self) -> None:
+        if self.is_busy():
+            QMessageBox.information(self, "EUS", self.t("busy"))
+            return
+        self.start_queue([self.root_queue_item("pause", ["0"])], "settings")
+
+    # ------------------------------------------------------------- updates
     def read_state(self) -> dict[str, str]:
         return read_key_values(STATE_FILE)
 
@@ -741,23 +2197,21 @@ class UpdateWindow(QMainWindow):
         self.tree.clear()
         self.package_items.clear()
         self.progress_widgets.clear()
-        groups = {key: [r for r in self.records if r["category"] == key]
-                  for key in ("critical", "medium", "normal", "flatpak")}
+        groups = {key: [r for r in self.records if r["category"] == key] for key in CATEGORY_ORDER}
         first_package_item = None
-        for category in ("critical", "medium", "normal", "flatpak"):
+        for category in CATEGORY_ORDER:
             records = groups[category]
+            chip = self.chips[category]
+            chip.setText(f"{self.t('chip_' + category)}  {len(records)}")
+            chip.setVisible(bool(records))
             if not records:
                 continue
-            if self.tree.topLevelItemCount() > 0:
-                spacer = QTreeWidgetItem([""])
-                spacer.setFlags(Qt.ItemFlag.NoItemFlags)
-                spacer.setSizeHint(0, QSize(0, 8 if category != "flatpak" else 12))
-                self.tree.addTopLevelItem(spacer)
-            _color, pale, dark = CATEGORY_COLORS[category]
+            color, pale, dark = CATEGORY_COLORS[category]
             group = QTreeWidgetItem([f"●  {self.t(category)}  ({len(records)})"])
             group.setFlags(Qt.ItemFlag.ItemIsEnabled)
             group.setForeground(0, QBrush(QColor(dark)))
-            group.setBackground(0, QBrush(QColor(pale)))
+            for column in range(5):
+                group.setBackground(column, QBrush(QColor(pale)))
             font = QFont()
             font.setBold(True)
             font.setPointSize(10)
@@ -774,9 +2228,9 @@ class UpdateWindow(QMainWindow):
                 package_font = item.font(0)
                 package_font.setBold(True)
                 item.setFont(0, package_font)
-                for column in range(5):
-                    item.setBackground(column, QBrush(QColor(pale)))
-                    item.setForeground(column, QBrush(QColor("#263746")))
+                item.setForeground(0, QBrush(QColor("#111827")))
+                for column in (1, 2, 3):
+                    item.setForeground(column, QBrush(QColor("#4B5563")))
                 item.setToolTip(0, record["description"])
                 progress_container = QWidget(objectName="rowProgressContainer")
                 progress_layout = QHBoxLayout(progress_container)
@@ -816,10 +2270,12 @@ class UpdateWindow(QMainWindow):
             self.status_title.setText(self.t("current"))
         else:
             self.status_title.setText(self.t("empty"))
+        if state.get("checked_at"):
+            self.check_button.setText(self.t("check_again"))
         self.select_all.blockSignals(True)
         self.select_all.setChecked(bool(self.package_items))
         self.select_all.blockSignals(False)
-        self.select_all.setEnabled(bool(self.package_items))
+        self.select_all.setEnabled(bool(self.package_items) and not self.is_busy())
         if first_package_item is not None:
             self.tree.setCurrentItem(first_package_item)
         else:
@@ -849,7 +2305,9 @@ class UpdateWindow(QMainWindow):
         selected = self.selected_records()
         self.selection_label.setText(self.t("selected", count=len(selected),
                                             size=format_bytes(sum(r["size"] for r in selected))))
-        self.install_button.setEnabled(bool(selected) and self.process is None)
+        can_install = bool(selected) and not self.is_busy()
+        self.install_button.setEnabled(can_install)
+        self.install_action.setEnabled(can_install)
         self.select_all.blockSignals(True)
         self.select_all.setChecked(bool(self.package_items) and len(selected) == len(self.package_items))
         self.select_all.blockSignals(False)
@@ -890,22 +2348,31 @@ class UpdateWindow(QMainWindow):
         super().showEvent(event)
 
     def closeEvent(self, event) -> None:
-        if self.process is not None:
-            QMessageBox.information(self, "EUS", self.t("installing"))
+        if self.is_busy():
+            QMessageBox.information(self, "EUS", self.t("busy"))
             event.ignore()
             return
-        if self.records:
+        if self.records and not paused_until():
             set_panel_status("available", count=len(self.records))
         else:
             set_panel_status("hidden")
         super().closeEvent(event)
 
+    def is_busy(self) -> bool:
+        return self.process is not None or self.external_busy
+
     def set_busy(self, busy: bool, text: str = "") -> None:
-        for widget in (self.about_button, self.settings_button, self.history_button, self.check_button,
-                       self.close_button, self.select_all):
+        for widget in (self.history_button, self.check_button, self.select_all):
             widget.setEnabled(not busy)
-        self.install_button.setEnabled(not busy and bool(self.selected_records()))
+        for action in self.busy_actions:
+            action.setEnabled(not busy)
+        for banner in (self.pause_banner, self.repo_banner, self.kernel_banner, self.restart_banner):
+            banner.setEnabled(not busy)
+        can_install = not busy and bool(self.selected_records())
+        self.install_button.setEnabled(can_install)
+        self.install_action.setEnabled(can_install)
         self.progress_detail.setVisible(busy)
+        self.global_progress.setVisible(busy)
         if busy:
             self.status_title.setText(text)
             self.progress_detail.setText(text)
@@ -969,11 +2436,26 @@ class UpdateWindow(QMainWindow):
             return ROOT_HELPER, args
         return "pkexec", [ROOT_HELPER, *args]
 
+    def failure_detail(self, exit_code: int, started_at: float, timed_out: bool = False) -> str:
+        """Explain a failed root action without showing a stale error from an earlier run."""
+        if timed_out:
+            return self.t("timeout")
+        if exit_code in {126, 127}:
+            return self.t("auth")
+        try:
+            if ERROR_FILE.stat().st_mtime >= started_at - 1:
+                server_error = ERROR_FILE.read_text(encoding="utf-8", errors="replace").strip()
+                if server_error:
+                    return server_error
+        except OSError:
+            pass
+        return self.t("failed")
+
     def root_queue_item(self, action: str, extra: list[str] | None = None,
                         records: list[dict] | None = None) -> dict:
         program, args = self.privileged_command(action, extra or [])
         timeout_ms = 7_200_000 if action in {"upgrade-apt", "install-apt"} else (
-            3_700_000 if action == "install-flatpak-system" else 600_000)
+            3_700_000 if action == "install-flatpak-system" else 900_000)
         return {"program": program, "args": args, "protocol": True, "root": True,
                 "records": records or [], "timeout_ms": timeout_ms,
                 "ignore_failure": False}
@@ -989,7 +2471,7 @@ class UpdateWindow(QMainWindow):
                 "records": [], "timeout_ms": 120_000}
 
     def start_queue(self, commands: list[dict], operation: str) -> None:
-        if self.process is not None or not commands:
+        if self.is_busy() or not commands:
             return
         self.operation_kind = operation
         self.pending_commands = list(commands)
@@ -1004,6 +2486,7 @@ class UpdateWindow(QMainWindow):
         self.current_command = self.pending_commands.pop(0)
         self.process_buffer = ""
         self.process_was_timed_out = False
+        self.operation_started = datetime.now().timestamp()
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         environment = QProcessEnvironment.systemEnvironment()
@@ -1091,20 +2574,30 @@ class UpdateWindow(QMainWindow):
                 self.run_next_command()
                 return
             self.pending_commands.clear()
+            self.operation_kind = ""
             self.set_busy(False)
-            detail = self.t("timeout") if timed_out else (
-                self.t("auth") if command.get("root") and exit_code in {126, 127} else self.t("failed"))
-            if command.get("root") and not timed_out:
-                try:
-                    server_error = ERROR_FILE.read_text(encoding="utf-8", errors="replace").strip()
-                    if server_error:
-                        detail = server_error
-                except OSError:
-                    pass
-            QMessageBox.critical(self, "EUS", detail)
+            if command.get("root"):
+                detail = self.failure_detail(exit_code, self.operation_started, timed_out)
+            else:
+                detail = self.t("timeout") if timed_out else self.t("failed")
             self.load_updates()
+            self.refresh_banners()
+            self.show_failure(detail)
             return
         self.run_next_command()
+
+    def show_failure(self, detail: str) -> None:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Critical)
+        dialog.setWindowTitle("EUS")
+        dialog.setText(detail)
+        keyfix = None
+        if "Key Fix" in detail or re.search(r"NO_PUBKEY|GPG|signed|duplicate", detail, re.I):
+            keyfix = dialog.addButton(self.t("open_keyfix"), QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton(self.t("close"), QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if keyfix is not None and dialog.clickedButton() is keyfix:
+            self.show_key_fix()
 
     def finish_operation(self) -> None:
         operation = self.operation_kind
@@ -1120,12 +2613,25 @@ class UpdateWindow(QMainWindow):
             except OSError:
                 pass
             self.load_updates()
+            self.refresh_banners()
             if needs_restart:
                 self.show_restart_prompt()
             else:
                 QMessageBox.information(self, "EUS", self.t("success"))
             return
         self.load_updates()
+        self.refresh_banners()
+
+    def request_reboot(self) -> None:
+        program, args = self.privileged_command("reboot", [])
+        QProcess.startDetached(program, args)
+
+    def confirm_reboot(self) -> None:
+        answer = QMessageBox.question(self, self.t("restart_title"), self.t("restart_body"),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self.request_reboot()
 
     def show_restart_prompt(self) -> None:
         dialog = QMessageBox(self)
@@ -1137,11 +2643,12 @@ class UpdateWindow(QMainWindow):
         dialog.addButton(self.t("restart_later"), QMessageBox.ButtonRole.RejectRole)
         dialog.exec()
         if dialog.clickedButton() is restart_button:
-            program, args = self.privileged_command("reboot", [])
-            QProcess.startDetached(program, args)
+            self.request_reboot()
             self.close()
 
     def check_updates(self) -> None:
+        if self.is_busy():
+            return
         self.check_button.setText(self.t("check_again"))
         commands = []
         if shutil.which("flatpak"):
@@ -1151,7 +2658,7 @@ class UpdateWindow(QMainWindow):
 
     def install_updates(self) -> None:
         selected = self.selected_records()
-        if not selected:
+        if not selected or self.is_busy():
             return
         total_size = format_bytes(sum(r["size"] for r in selected))
         text = self.t("confirm", count=len(selected), size=total_size) + "\n\n" + self.t("partial_warning")
@@ -1184,11 +2691,13 @@ class UpdateWindow(QMainWindow):
         if user_flatpak_records:
             commands.append(self.user_flatpak_queue_item(
                 [r["name"] for r in user_flatpak_records], user_flatpak_records))
-        # Always rebuild updates.tsv after installation. This prevents stale
-        # package rows and an incorrect panel icon after updates complete.
-        commands.append(self.root_queue_item("refresh"))
+        # upgrade-apt, install-apt and install-flatpak-system rebuild updates.tsv
+        # themselves; a separate refresh is only needed after user Flatpaks.
+        if user_flatpak_records or not (selected_apt or system_flatpak_records):
+            commands.append(self.root_queue_item("refresh"))
         self.start_queue(commands, "install")
 
+    # ------------------------------------------------------------- dialogs
     def notifier_enabled(self) -> bool:
         override = Path.home() / ".config/autostart/eduka-update-system-notifier.desktop"
         if not override.exists():
@@ -1209,12 +2718,32 @@ class UpdateWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "EUS", str(exc))
 
-    def current_interval(self) -> int:
-        try:
-            value = int(INTERVAL_FILE.read_text(encoding="utf-8").strip())
-            return value if value in {1, 3, 6, 12, 24} else 6
-        except (OSError, ValueError):
-            return 6
+    def run_dialog(self, dialog: QDialog) -> None:
+        if self.is_busy():
+            QMessageBox.information(self, "EUS", self.t("busy"))
+            return
+        dialog.exec()
+        if getattr(dialog, "changed", False):
+            self.load_updates()
+        self.refresh_banners()
+
+    def open_page(self, page: str) -> None:
+        handlers = {"kernel": self.show_kernels, "key-fix": self.show_key_fix,
+                    "add-key": self.show_add_key, "settings": self.show_settings}
+        if page in handlers and QApplication.activeModalWidget() is None:
+            handlers[page]()
+
+    def show_kernels(self) -> None:
+        self.run_dialog(KernelDialog(self))
+
+    def show_key_fix(self) -> None:
+        self.run_dialog(KeyFixDialog(self))
+
+    def show_add_key(self) -> None:
+        self.run_dialog(AddKeyDialog(self))
+
+    def show_settings(self) -> None:
+        self.run_dialog(SettingsDialog(self))
 
     def show_about(self) -> None:
         dialog = QMessageBox(self)
@@ -1227,33 +2756,28 @@ class UpdateWindow(QMainWindow):
         dialog.setStandardButtons(QMessageBox.StandardButton.Close)
         dialog.exec()
 
-    def show_settings(self) -> None:
+    def show_log(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle(self.t("settings_title"))
-        dialog.setMinimumWidth(450)
+        dialog.setWindowTitle(self.t("log_title"))
+        dialog.resize(820, 540)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(self.t("interval")))
-        interval = QComboBox()
-        for hours in (1, 3, 6, 12, 24):
-            interval.addItem(self.t("hours", hours=hours), hours)
-        current = self.current_interval()
-        interval.setCurrentIndex(interval.findData(current))
-        layout.addWidget(interval)
-        notify = QCheckBox(self.t("notifications"))
-        notify.setChecked(self.notifier_enabled())
-        layout.addWidget(notify)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText(self.t("save"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(self.t("cancel"))
-        buttons.accepted.connect(dialog.accept)
+        viewer = QPlainTextEdit()
+        viewer.setReadOnly(True)
+        viewer.setFont(mono_font())
+        viewer.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        try:
+            lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-1500:]
+            viewer.setPlainText("\n".join(lines) or "—")
+        except OSError:
+            viewer.setPlainText("—")
+        viewer.moveCursor(viewer.textCursor().MoveOperation.End)
+        layout.addWidget(viewer)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText(self.t("close"))
         buttons.rejected.connect(dialog.reject)
+        style_button_box(buttons)
         layout.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        self.set_notifier_enabled(notify.isChecked())
-        new_interval = int(interval.currentData())
-        if new_interval != current:
-            self.start_queue([self.root_queue_item("set-interval", [str(new_interval)])], "settings")
+        dialog.exec()
 
     def show_history(self) -> None:
         dialog = QDialog(self)
@@ -1287,13 +2811,14 @@ class UpdateWindow(QMainWindow):
                     f"[{display_time}]\n{marker} {name} — {status}\n"
                     f"  {installed} → {candidate}"
                 )
-            return "\n\n".join(entries) if entries else self.t("no_history")
+            # Newest entries first.
+            return "\n\n".join(reversed(entries)) if entries else self.t("no_history")
 
         viewer.setPlainText(render_history())
         layout.addWidget(viewer)
         button_row = QHBoxLayout()
         clear_button = QPushButton(self.t("clear_history"), objectName="secondaryButton")
-        close = QPushButton(self.t("close"))
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
         close.clicked.connect(dialog.accept)
         button_row.addWidget(clear_button)
         button_row.addStretch(1)
@@ -1322,19 +2847,26 @@ class UpdateWindow(QMainWindow):
 
 
 def main() -> int:
-    app = QApplication(sys.argv)
+    args = sys.argv[1:]
+    page = ""
+    if "--open" in args:
+        index = args.index("--open")
+        page = args[index + 1] if index + 1 < len(args) else ""
+        del args[index:index + 2]
+    screenshot = args[1] if len(args) >= 2 and args[0] == "--screenshot" else ""
+
+    app = QApplication(sys.argv[:1])
     app.setApplicationName("Eduka-Update-System")
     app.setOrganizationName("Edukasaun OS")
     app.setDesktopFileName("eduka-update-system")
     app.setWindowIcon(QIcon(EUS_APP_ICON))
-    screenshot_mode = len(sys.argv) >= 3 and sys.argv[1] == "--screenshot"
-    if not screenshot_mode and request_existing_window():
+    if not screenshot and request_existing_window(page):
         return 0
-    if not screenshot_mode and gui_pid_is_live():
+    if not screenshot and gui_pid_is_live():
         # A just-started primary instance may still be creating its local
         # socket. Avoid a second window while it finishes initialization.
         def retry_primary() -> None:
-            request_existing_window()
+            request_existing_window(page)
             app.quit()
 
         QTimer.singleShot(250, retry_primary)
@@ -1342,11 +2874,11 @@ def main() -> int:
 
     server = None
     pid_file = None
-    if not screenshot_mode:
+    if not screenshot:
         QLocalServer.removeServer(INSTANCE_NAME)
         server = QLocalServer(app)
         if not server.listen(INSTANCE_NAME):
-            if request_existing_window():
+            if request_existing_window(page):
                 return 0
             print(f"EUS could not create its single-instance socket: {server.errorString()}",
                   file=sys.stderr)
@@ -1365,10 +2897,14 @@ def main() -> int:
 
     if server is not None:
         def present_primary_window() -> None:
+            requested = ""
             while server.hasPendingConnections():
                 connection = server.nextPendingConnection()
                 if connection is not None:
-                    connection.readAll()
+                    connection.waitForReadyRead(200)
+                    message = bytes(connection.readAll()).decode("utf-8", "replace").strip()
+                    if message.startswith("open:"):
+                        requested = message[5:]
                     connection.disconnectFromServer()
                     connection.deleteLater()
             if window.isMinimized() or window.isFullScreen():
@@ -1377,6 +2913,8 @@ def main() -> int:
                 window.show()
             window.raise_()
             window.activateWindow()
+            if requested:
+                QTimer.singleShot(0, lambda: window.open_page(requested))
 
         server.newConnection.connect(present_primary_window)
         app._eus_instance_server = server
@@ -1391,14 +2929,15 @@ def main() -> int:
 
         app.aboutToQuit.connect(remove_pid_file)
 
-    if screenshot_mode:
-        destination = sys.argv[2]
-
+    if screenshot:
         def save_preview() -> None:
-            window.grab().save(destination)
-            app.quit()
+            target = QApplication.activeModalWidget() or window
+            target.grab().save(screenshot)
+            app.exit(0)
 
-        QTimer.singleShot(700, save_preview)
+        QTimer.singleShot(1200, save_preview)
+    if page:
+        QTimer.singleShot(0, lambda: window.open_page(page))
     return app.exec()
 
 

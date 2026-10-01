@@ -3,6 +3,55 @@
 All notable changes to Eduka-Update-System are documented here. The project
 uses a single public version number without a build suffix.
 
+## 0.13 — 2026-10-01
+
+### Added
+
+- **Kernel** menu: Kernel Manager dialog to install a new kernel (optionally
+  with headers) or remove kernels. Kernels older than the running one are
+  marked *Old kernel — safe to remove* after a restart; the running kernel and
+  the kernel metapackage are protected, and removals are simulated first. A
+  one-time notification after booting a new kernel points to old kernels.
+- **Key Fix** menu: repairs missing/expired repository keys (keyserver, with an
+  HTTPS fallback), the legacy `trusted.gpg` keyring, armored or damaged
+  keyrings and permissions, reinstalls the archive keyring, and fixes
+  duplicate repository entries (`.list` and deb822 `.sources`) with backups.
+- **Add Key** menu: manual GPG key installation from a file, HTTPS URL or key
+  ID, optionally adding the repository with `Signed-By` without duplicates.
+- Automatic refresh when repositories or keys are added in a terminal
+  (`eus-sources.path`); the open window reloads when the state changes.
+- Update schedule (interval up to weekly, or daily at a fixed time) and
+  pausing automatic checks and notifications for 1–365 days.
+- Terminal commands: `--open`, `--list-kernels`, `--install-kernel`,
+  `--remove-kernel`, `--remove-old-kernels`, `--fix-keys`,
+  `--fix-duplicates`, `--add-key`, `--pause`, `--resume`, `--schedule`.
+- `.deb` packaging (`make deb`, installable with `apt install ./…deb`, also in
+  the Cubic chroot) and a generated self-contained Cubic installer.
+
+### Changed
+
+- Redesigned interface: menu bar, branded header, status card with category
+  counters, action banners (paused, repository problems, old kernels,
+  restart), resizable list/description split, and log viewer. History lists
+  the newest entries first and includes kernel operations.
+- A failing or unreachable repository no longer aborts the whole update
+  check; EUS continues with the available package lists and reports the
+  problem, telling network failures apart from key problems.
+
+### Fixed
+
+- Update classification ran several `apt-cache` processes per package and
+  took minutes with many updates; it now uses one batched query (seconds).
+- APT download/install progress never reached the GUI because the progress
+  stream inherited APT's log redirection.
+- Installing selected updates used `apt-get install`, which marked upgraded
+  dependencies as manually installed; it now uses `--only-upgrade`.
+- Error dialogs could show a stale message from an earlier operation, or a
+  server error after authentication was cancelled.
+- Scripts in the repository were not executable, so `sudo ./install.sh` and
+  `make check` failed.
+- Installing updates no longer runs a redundant second full refresh.
+
 ## 0.12 — 2026-10-01
 
 ### Added

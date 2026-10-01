@@ -3,7 +3,7 @@
 ## Supported version
 
 Security fixes are applied to the latest EUS release. The currently supported
-version is `0.12`.
+version is `0.13`.
 
 ## Reporting a vulnerability
 
