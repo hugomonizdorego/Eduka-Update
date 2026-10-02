@@ -98,6 +98,37 @@ systemctl status eus-refresh.timer eus-sources.path
 The installer preserves an existing `/etc/eus/eus.conf` and update interval.
 Use `./install.sh --no-deps` when all runtime packages are already installed.
 
+## Download and install in the Cubic terminal
+
+Open the Cubic terminal (it already runs as root inside the ISO chroot) and
+run:
+
+```bash
+wget -O /tmp/get-eus.sh https://raw.githubusercontent.com/hugomonizdorego/Eduka-Update/main/tools/get-eus.sh
+bash /tmp/get-eus.sh
+```
+
+The script downloads `eduka-update-system_all.deb` from the latest GitHub
+release (or from `releases/` in the repository), checks it against
+`SHA256SUMS`, and installs it with APT so every dependency is installed too.
+To take the package from a branch or tag instead, run
+`EUS_REF=<branch-or-tag> bash /tmp/get-eus.sh`.
+
+Without the script:
+
+```bash
+cd /tmp
+wget https://raw.githubusercontent.com/hugomonizdorego/Eduka-Update/main/releases/eduka-update-system_all.deb
+apt-get update
+apt install ./eduka-update-system_all.deb
+eduka-update-system --version
+```
+
+The same commands work with `sudo` on an installed Edukasaun OS. Pushing a
+tag `vX.Y` that matches `VERSION` makes GitHub Actions build the package and
+publish it as a GitHub release; every push also uploads the built package as
+a workflow artifact.
+
 ## Install the .deb package (recommended, also inside Cubic)
 
 Build the package from a checkout (needs only `dpkg-deb`):

@@ -2,7 +2,7 @@ SHELL := /bin/bash
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 DIST_DIR := dist
 
-.PHONY: all check install uninstall install-no-deps source-archive deb cubic-installer clean
+.PHONY: all check install uninstall install-no-deps source-archive deb releases cubic-installer clean
 
 all: check
 
@@ -26,6 +26,13 @@ source-archive: check
 
 deb:
 	./packaging/build-deb.sh $(DIST_DIR)
+
+# Refresh the downloadable package kept in the repository (releases/).
+releases: check
+	rm -f releases/*.deb releases/SHA256SUMS
+	./packaging/build-deb.sh releases
+	cp releases/eduka-update-system_$(VERSION)_all.deb releases/eduka-update-system_all.deb
+	cd releases && sha256sum *.deb > SHA256SUMS
 
 cubic-installer:
 	./tools/build-cubic-installer.sh

@@ -1,0 +1,52 @@
+name: Build .deb package
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils gnupg
+
+      - name: Check sources
+        run: make check
+
+      - name: Build package
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          mkdir -p out
+          ./packaging/build-deb.sh out
+          cp "out/eduka-update-system_${version}_all.deb" out/eduka-update-system_all.deb
+          (cd out && sha256sum *.deb > SHA256SUMS)
+          cat out/SHA256SUMS
+          dpkg-deb --info "out/eduka-update-system_${version}_all.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eduka-update-system-deb
+          path: out/
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match VERSION ${version}" >&2
+            exit 1
+          fi
+          gh release create "${GITHUB_REF_NAME}" out/*.deb out/SHA256SUMS \
+            --title "Eduka-Update-System ${version}" \
+            --notes "Install in the Cubic terminal: \`apt install ./eduka-update-system_${version}_all.deb\` or run tools/get-eus.sh. See CHANGELOG.md."

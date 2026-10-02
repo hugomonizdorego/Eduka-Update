@@ -4,7 +4,8 @@
 2. Keep the visible version simple (for example `0.14`); do not add a build
    suffix.
 3. Regenerate the Cubic installer (`make cubic-installer`) and run `make check`.
-4. Build the package with `make deb` and copy it to `releases/`.
+4. Refresh the downloadable package with `make releases`, commit, then push a
+   `vX.Y` tag: the `Build .deb package` workflow publishes the GitHub release.
 5. Build an archive with `make source-archive`.
 6. Test installation on Edukasaun OS in both X11 and Wayland LXQt sessions.
 7. Verify APT-only, Flatpak-only, mixed, failed, and restart-required paths.
