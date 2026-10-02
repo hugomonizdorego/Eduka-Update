@@ -3,6 +3,35 @@
 All notable changes to Eduka-Update-System are documented here. The project
 uses a single public version number without a build suffix.
 
+## 0.15 — 2026-10-02
+
+### Changed
+
+- Redesigned, compact window: one toolbar with Refresh, Install Updates and
+  a single ☰ menu for every other feature; slim notice bars; flat update
+  list with a type column; Description / Packages / Changelog tabs; status
+  bar. Fonts follow the desktop instead of fixed large sizes.
+- Updates are grouped by source package and kernel packages are shown as
+  "Linux kernel x.y" (from mintupdate).
+- New update type **Kernel**; Firefox, Thunderbird and Chromium updates are
+  treated as security updates.
+
+### Added
+
+- System Cleaner (ideas from ubuntu-cleaner) with system and per-user items,
+  and automatic clean-up after installing updates or removing kernels.
+- Ignore list (this version / all future versions), changelog viewer,
+  self-update-first notice, automatic updates (security / all, AC power
+  only, shutdown inhibited), optional Timeshift snapshot, pending-update
+  reminders, waiting for the dpkg lock.
+- `--clean` and `--open cleaner`; desktop actions for System Cleaner and
+  Kernel Manager.
+
+### Fixed
+
+- Closing a dialog while a background scan was still running made the GUI
+  abort.
+
 ## 0.14 — 2026-10-02
 
 ### Added

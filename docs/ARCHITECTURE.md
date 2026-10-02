@@ -83,3 +83,15 @@ boundary.
 3. `os-upgrade` (root): disk-space and plan check, full upgrade of the current
    release, `os-switch` (backup + rewrite), `apt-get update` (restore on
    failure or key errors), `upgrade --without-new-pkgs`, `full-upgrade`.
+
+## Clean-up
+
+`eduka-update-system-tool scan-clean` lists what can be freed (system items
+are read unprivileged; per-user caches are scanned as the user).
+`clean-user` empties the user's caches without root; `clean-system` runs as
+root through the backend's `clean` action. After `upgrade-apt`,
+`install-apt`, kernel installation/removal and the OS upgrade, the backend
+runs `clean-system autoremove configs apt-cache` unless `AUTO_CLEAN=0` in
+`/etc/eus/eus.conf`. Other options there: `AUTO_UPGRADE=off|security|all`
+and `TIMESHIFT_SNAPSHOT=0|1`; ignored updates are listed in
+`/etc/eus/ignored-updates`.

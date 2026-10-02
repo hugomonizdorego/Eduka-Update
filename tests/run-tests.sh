@@ -47,6 +47,13 @@ grep -q '"medium": 1' <<<"$parser_result"
 grep -q '"normal": 1' <<<"$parser_result"
 grep -q '"flatpak": 1' <<<"$parser_result"
 
+# 0.15 format: source package and kind columns, kernel category.
+parser_result="$(python3 "$PROJECT_DIR/src/gui/eduka-update-system-gui.py" \
+    --self-test "$PROJECT_DIR/tests/sample-updates-015.tsv")"
+grep -q '"total": 4' <<<"$parser_result"
+grep -q '"kernel": 1' <<<"$parser_result"
+grep -q '"groups": 3' <<<"$parser_result"
+
 DESTDIR="$TEST_DIR/root" "$PROJECT_DIR/install.sh" --no-deps --no-services
 test -x "$TEST_DIR/root/usr/local/bin/eduka-update-system"
 test -x "$TEST_DIR/root/usr/local/libexec/eduka-update-system-gui"
@@ -55,7 +62,7 @@ test -r "$TEST_DIR/root/etc/systemd/system/eus-sources.path"
 test -L "$TEST_DIR/root/usr/local/bin/eduka-upgrade-action.sh"
 test -r "$TEST_DIR/root/usr/share/applications/eduka-update-system.desktop"
 test -r "$TEST_DIR/root/etc/eus/version"
-grep -qx "VERSION='0.14'" "$TEST_DIR/root/etc/eus/version"
+grep -qx "VERSION='0.15'" "$TEST_DIR/root/etc/eus/version"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$PROJECT_DIR/data/applications/eduka-update-system.desktop"

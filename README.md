@@ -1,6 +1,6 @@
 # Eduka-Update-System (EUS)
 
-![Version](https://img.shields.io/badge/version-0.14-17845b)
+![Version](https://img.shields.io/badge/version-0.15-17845b)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Platform](https://img.shields.io/badge/platform-Edukasaun%20OS%20%7C%20Debian-orange)
 
@@ -29,7 +29,33 @@ separate application.
 - Installation-only history with success/failure status and a clear action.
 - Automatic language selection from the session locale: English, Tetum,
   Portuguese, or Indonesian.
-- Version shown in **About**; the public version is exactly `0.14`.
+- Version shown in **About**; the public version is exactly `0.15`.
+
+### Added in 0.15: compact interface, Mint-style smart updates, System Cleaner
+
+The window is now small and quiet: one toolbar (**Refresh**, **Install
+Updates**, and a single **☰** menu that holds every other feature), slim
+notice bars, a flat update list, a Description / Packages / Changelog panel
+and a status bar. Ideas taken from Linux Mint's
+[mintupdate](https://github.com/linuxmint/mintupdate) and
+[ubuntu-cleaner](https://github.com/gerardpuig/ubuntu-cleaner) (both GPL-3+)
+were re-implemented for EUS:
+
+| Feature | What it does |
+| --- | --- |
+| Source grouping | Binary packages built from one source are one row (all WebKitGTK libraries → `webkitgtk (6)`); kernel packages show as *Linux kernel x.y*. |
+| Update types | Security (Debian-Security archive, plus Firefox/Thunderbird/Chromium as Mint does), Kernel, Important, Regular, Flatpak. |
+| Ignore updates | Right-click → *Ignore this version* or *Ignore all future updates*; managed in Settings → Ignored updates (`/etc/eus/ignored-updates`, globs allowed). Ignored packages are held during a full upgrade and skipped by automatic updates. |
+| Changelog | Downloaded on demand with `apt-get changelog`, showing only the entries newer than the installed version. |
+| Self-update first | When EUS itself has an update, a notice offers to install it before the rest. |
+| Automatic updates | Settings → Automation: never / security only / all, after the scheduled check, only on AC power, with shutdown inhibited. |
+| Timeshift | Optional snapshot before installing updates, kernels or an OS upgrade. |
+| Update reminders | If the same updates stay pending, a reminder appears after 2 days (security) or 7 days, at most once a day. |
+| dpkg lock | APT waits for another package manager to finish instead of failing. |
+| System Cleaner | ☰ → System Cleaner: APT cache, unneeded packages, leftover configuration, old kernels, rotated logs, crash reports, old journal, unused Flatpak runtimes, and per-user thumbnail / browser (Firefox, Chrome, Chromium, Brave, Edge, Opera, Thunderbird) / pip caches and Trash. |
+| Clean after updates | After installing updates, installing/removing kernels or upgrading the OS, EUS removes unneeded packages, purges leftover configuration and empties the package cache (can be turned off). |
+
+Terminal: `eduka-update-system --clean`, `--open cleaner`.
 
 ### Added in 0.14: a smarter updater
 
@@ -134,7 +160,7 @@ a workflow artifact.
 Build the package from a checkout (needs only `dpkg-deb`):
 
 ```bash
-make deb          # -> dist/eduka-update-system_0.14_all.deb
+make deb          # -> dist/eduka-update-system_0.15_all.deb
 ```
 
 A prebuilt package is also kept in `releases/`. Copy it into the Cubic
@@ -142,7 +168,7 @@ chroot (drag it into the Cubic terminal window) and install it with APT so
 the dependencies are resolved:
 
 ```bash
-apt install ./eduka-update-system_0.14_all.deb
+apt install ./eduka-update-system_0.15_all.deb
 ```
 
 The package enables `eus-refresh.timer` and `eus-sources.path` without

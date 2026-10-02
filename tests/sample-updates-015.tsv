@@ -1,0 +1,4 @@
+critical	apt	libwebkitgtk-6.0-4	2.52.6-1	2.54.0-1	25060556	Web content engine library for GTK	webkitgtk	security
+critical	apt	libjavascriptcoregtk-6.0-1	2.52.6-1	2.54.0-1	7864320	JavaScript engine library from WebKitGTK	webkitgtk	security
+kernel	apt	linux-image-amd64	6.12.48-1	6.12.57-1	1532	Linux for 64-bit PCs (meta-package)	linux-signed-amd64	kernel
+normal	apt	tzdata	2025b-4	2025c-0	262144	time zone and daylight-saving time data	tzdata	package

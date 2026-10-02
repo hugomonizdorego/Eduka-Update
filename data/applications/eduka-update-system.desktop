@@ -17,8 +17,17 @@ TryExec=/usr/local/bin/eduka-update-system
 Icon=eduka-update-system
 Terminal=false
 DBusActivatable=false
-Categories=System;Settings;
-Keywords=update;upgrade;security;APT;Flatpak;EUS;Edukasaun;
+Categories=System;PackageManager;
+Keywords=update;upgrade;security;APT;Flatpak;EUS;Edukasaun;cleaner;kernel;clean;
 StartupNotify=true
 StartupWMClass=Eduka-Update-System
 X-LXQt-Need-Tray=false
+Actions=Cleaner;Kernels;
+
+[Desktop Action Cleaner]
+Name=System Cleaner
+Exec=/usr/local/bin/eduka-update-system --open cleaner
+
+[Desktop Action Kernels]
+Name=Kernel Manager
+Exec=/usr/local/bin/eduka-update-system --open kernel

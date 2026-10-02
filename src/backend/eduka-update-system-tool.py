@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Repository, keyring, kernel and OS-upgrade helper for Eduka-Update-System.
+"""Repository, keyring, kernel, cleaner and OS-upgrade helper for Eduka-Update-System.
 
 Read-only subcommands (scan-repos, scan-keys, kernels, os-plan) run unprivileged and
 print JSON for the GUI. Changing subcommands run as root, only through the
@@ -1472,6 +1472,248 @@ def os_restore(backup: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# System cleaner (ideas from ubuntu-cleaner's janitor plugins, GPL-3+)
+# --------------------------------------------------------------------------
+
+APT_ARCHIVES = Path(ROOT + "/var/cache/apt/archives")
+CRASH_DIR = Path(ROOT + "/var/crash")
+LOG_ROOT = Path(ROOT + "/var/log")
+ROTATED_LOG_RE = re.compile(r".*\.(\d+|\d+\.gz|gz|old|xz|bz2)$")
+
+# Cache directories that are safe to empty (applications rebuild them).
+# (id, title, list of directories relative to $HOME; globs allowed)
+USER_CACHES = (
+    ("thumbnails", "Thumbnail cache", ["~/.cache/thumbnails", "~/.thumbnails"]),
+    ("firefox", "Firefox cache", ["~/.cache/mozilla/firefox/*/cache2",
+                                  "~/snap/firefox/common/.cache/mozilla/firefox/*/cache2",
+                                  "~/.var/app/org.mozilla.firefox/cache/mozilla/firefox/*/cache2"]),
+    ("thunderbird", "Thunderbird cache", ["~/.cache/thunderbird/*/cache2"]),
+    ("chrome", "Google Chrome cache", ["~/.cache/google-chrome/*/Cache", "~/.cache/google-chrome/*/Code Cache"]),
+    ("chromium", "Chromium cache", ["~/.cache/chromium/*/Cache", "~/.cache/chromium/*/Code Cache",
+                                    "~/snap/chromium/common/.cache/chromium/*/Cache"]),
+    ("brave", "Brave cache", ["~/.cache/BraveSoftware/Brave-Browser/*/Cache",
+                              "~/.cache/BraveSoftware/Brave-Browser/*/Code Cache"]),
+    ("edge", "Microsoft Edge cache", ["~/.cache/microsoft-edge*/*/Cache", "~/.cache/microsoft-edge*/*/Code Cache"]),
+    ("opera", "Opera cache", ["~/.cache/opera/Cache", "~/.opera/cache"]),
+    ("pip", "Python pip cache", ["~/.cache/pip"]),
+    ("trash", "Trash", ["~/.local/share/Trash/files", "~/.local/share/Trash/info"]),
+)
+USER_DEFAULT_OFF = {"trash", "pip"}
+SYSTEM_DEFAULT_OFF = {"journal", "flatpak"}
+
+
+def dir_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def user_cache_dirs(patterns: list[str]) -> list[Path]:
+    import glob
+    found: list[Path] = []
+    for pattern in patterns:
+        for match in glob.glob(os.path.expanduser(pattern)):
+            path = Path(match)
+            if path.is_dir() and not path.is_symlink() and path not in found:
+                found.append(path)
+    return found
+
+
+def scan_user() -> list[dict]:
+    items = []
+    for item_id, title, patterns in USER_CACHES:
+        dirs = user_cache_dirs(patterns)
+        size = sum(dir_size(d) for d in dirs)
+        if size:
+            items.append({"id": item_id, "title": title, "scope": "user", "size": size,
+                          "detail": ", ".join(str(d) for d in dirs[:3]),
+                          "default": item_id not in USER_DEFAULT_OFF})
+    return items
+
+
+def clean_user(ids: list[str]) -> dict:
+    """Empty the selected per-user caches. Never runs as root."""
+    if os.geteuid() == 0 and not ROOT:
+        raise ToolError("User caches are cleaned as the user, not as root.")
+    home = Path.home().resolve()
+    freed = 0
+    cleaned = []
+    for item_id, title, patterns in USER_CACHES:
+        if item_id not in ids:
+            continue
+        for directory in user_cache_dirs(patterns):
+            resolved = directory.resolve()
+            if home not in resolved.parents:
+                continue
+            freed += dir_size(resolved)
+            for child in resolved.iterdir():
+                try:
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                except OSError:
+                    pass
+        cleaned.append(title)
+    return {"freed": freed, "cleaned": cleaned}
+
+
+def autoremove_candidates() -> list[dict]:
+    """Packages `apt-get autoremove` would remove (simulated, unprivileged)."""
+    result = run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "autoremove", "--purge"], timeout=120,
+                 env={**os.environ, "LC_ALL": "C"})
+    names = re.findall(r"^(?:Remv|Purg) (\S+)", result.stdout.decode("utf-8", "replace"), re.M)
+    sizes = {p["name"]: p["size_kb"] for p in dpkg_packages("*")} if names else {}
+    return [{"name": n, "size": sizes.get(n.split(":")[0], 0) * 1024} for n in names]
+
+
+def residual_configs() -> list[str]:
+    return [p["name"] for p in dpkg_packages("*") if p["status"] == "config-files"]
+
+
+def rotated_logs() -> list[Path]:
+    logs = []
+    if LOG_ROOT.is_dir():
+        for root, _dirs, files in os.walk(LOG_ROOT, onerror=lambda _e: None):
+            for name in files:
+                if ROTATED_LOG_RE.match(name):
+                    logs.append(Path(root) / name)
+    return logs
+
+
+def journal_size() -> int:
+    if not shutil.which("journalctl"):
+        return 0
+    result = run(["journalctl", "--disk-usage"], timeout=20)
+    match = re.search(r"take up ([\d.]+)([KMGT]?)", result.stdout.decode("utf-8", "replace"))
+    if not match:
+        return 0
+    units = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
+    return int(float(match.group(1)) * units[match.group(2)])
+
+
+def scan_system() -> list[dict]:
+    items = []
+    debs = list(APT_ARCHIVES.glob("*.deb")) if APT_ARCHIVES.is_dir() else []
+    size = sum(p.stat().st_size for p in debs if p.is_file())
+    if debs:
+        items.append({"id": "apt-cache", "title": "Downloaded package files (APT cache)", "scope": "system",
+                      "size": size, "detail": f"{len(debs)} files in /var/cache/apt/archives", "default": True})
+    unneeded = [p for p in autoremove_candidates() if not p["name"].startswith("linux-image")]
+    if unneeded:
+        items.append({"id": "autoremove", "title": "Packages that are no longer needed", "scope": "system",
+                      "size": sum(p["size"] for p in unneeded),
+                      "detail": ", ".join(p["name"] for p in unneeded[:8]) + (" …" if len(unneeded) > 8 else ""),
+                      "default": True})
+    configs = residual_configs()
+    if configs:
+        items.append({"id": "configs", "title": "Leftover configuration of removed packages", "scope": "system",
+                      "size": 0, "detail": ", ".join(configs[:8]) + (" …" if len(configs) > 8 else ""),
+                      "default": True})
+    try:
+        old = [k for k in list_kernels(include_available=False)["installed"] if k["state"] == "old"]
+    except (ToolError, OSError, subprocess.TimeoutExpired):
+        old = []
+    if old:
+        items.append({"id": "old-kernels", "title": "Old kernels (the running kernel is kept)", "scope": "system",
+                      "size": sum(k["size_kb"] for k in old) * 1024,
+                      "detail": ", ".join(k["release"] for k in old), "default": True})
+    logs = rotated_logs()
+    if logs:
+        items.append({"id": "logs", "title": "Old rotated log files", "scope": "system",
+                      "size": sum(p.stat().st_size for p in logs if p.exists()),
+                      "detail": f"{len(logs)} files in /var/log", "default": True})
+    crashes = [p for p in CRASH_DIR.glob("*") if p.is_file()] if CRASH_DIR.is_dir() else []
+    if crashes:
+        items.append({"id": "crash", "title": "Crash reports", "scope": "system",
+                      "size": sum(p.stat().st_size for p in crashes), "detail": "/var/crash", "default": True})
+    size = journal_size()
+    if size > 64 * 1024 * 1024:
+        items.append({"id": "journal", "title": "System journal older than 2 weeks", "scope": "system",
+                      "size": size, "detail": "journalctl --vacuum-time=2weeks", "default": False})
+    if shutil.which("flatpak"):
+        items.append({"id": "flatpak", "title": "Unused Flatpak runtimes", "scope": "system", "size": 0,
+                      "detail": "flatpak uninstall --unused", "default": False})
+    return items
+
+
+def clean_system(ids: list[str]) -> dict:
+    """Clean the selected system items (root, called by the backend)."""
+    require_root()
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive", "LC_ALL": "C"}
+    apt = ["apt-get", "-y", "-q", "-o", "DPkg::Lock::Timeout=120",
+           "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
+    done, errors = [], []
+    order = ["old-kernels", "autoremove", "configs", "apt-cache", "logs", "crash", "journal", "flatpak"]
+    selected = [i for i in order if i in ids]
+    for index, item in enumerate(selected):
+        progress(5 + index * 90 // max(1, len(selected)), f"Cleaning: {item}")
+        try:
+            if item == "old-kernels":
+                old = [k["release"] for k in list_kernels(include_available=False)["installed"]
+                       if k["state"] == "old"]
+                if old:
+                    packages = kernel_plan("remove", old, False)
+                    if run(apt + ["purge", *packages], timeout=1800, env=env).returncode != 0:
+                        raise ToolError("old kernels could not be removed")
+            elif item == "autoremove":
+                if run(apt + ["autoremove", "--purge"], timeout=1800, env=env).returncode != 0:
+                    raise ToolError("apt-get autoremove failed")
+            elif item == "configs":
+                configs = residual_configs()
+                if configs and run(["dpkg", "--purge", *configs], timeout=600, env=env).returncode != 0:
+                    raise ToolError("residual configuration could not be purged")
+            elif item == "apt-cache":
+                run(apt + ["clean"], timeout=300, env=env)
+            elif item == "logs":
+                for path in rotated_logs():
+                    path.unlink(missing_ok=True)
+            elif item == "crash":
+                for path in CRASH_DIR.glob("*"):
+                    if path.is_file():
+                        path.unlink(missing_ok=True)
+            elif item == "journal" and shutil.which("journalctl"):
+                run(["journalctl", "--vacuum-time=2weeks"], timeout=300)
+            elif item == "flatpak" and shutil.which("flatpak"):
+                run(["flatpak", "uninstall", "--unused", "--system", "-y", "--noninteractive"], timeout=1800)
+            done.append(item)
+        except (ToolError, OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{item}: {exc}")
+    progress(100, msg("done"))
+    return {"cleaned": done, "errors": errors}
+
+
+def changelog(package: str, installed: str, limit: int = 400) -> str:
+    """New changelog entries of a package (apt-get changelog uses the archive's
+    Changelogs URI from the Release file, so it works for Debian and others)."""
+    if not re.match(r"^[a-z0-9][a-z0-9+.:-]*$", package):
+        raise ToolError("Invalid package name.")
+    result = run(["apt-get", "changelog", "-q", package], timeout=40, env={**os.environ, "LC_ALL": "C",
+                                                                          "PAGER": "cat"})
+    text = result.stdout.decode("utf-8", "replace")
+    if result.returncode != 0 or not text.strip():
+        raise ToolError("No changelog is available for this update.")
+    lines = []
+    plain_installed = installed.split(":", 1)[-1]
+    for line in text.splitlines():
+        if not lines and re.match(r"^(Get|Hit|Ign|Err):\d+ ", line):
+            continue
+        header = re.match(r"^\S+ \(([^)]+)\) ", line)
+        if header and installed not in {"", "-"} and header.group(1).split(":", 1)[-1] == plain_installed:
+            break
+        lines.append(line)
+        if len(lines) >= limit:
+            lines.append("…")
+            break
+    return "\n".join(lines).strip()
+
+
+# --------------------------------------------------------------------------
 # Kernels
 # --------------------------------------------------------------------------
 
@@ -1725,6 +1967,15 @@ def main(argv: list[str]) -> int:
     os_sw.add_argument("target")
     os_rs = sub.add_parser("os-restore")
     os_rs.add_argument("backup")
+    scan_clean = sub.add_parser("scan-clean")
+    scan_clean.add_argument("--scope", choices=("all", "system", "user"), default="all")
+    clean_u = sub.add_parser("clean-user")
+    clean_u.add_argument("items", nargs="+")
+    clean_s = sub.add_parser("clean-system")
+    clean_s.add_argument("items", nargs="+")
+    log_parser = sub.add_parser("changelog")
+    log_parser.add_argument("package")
+    log_parser.add_argument("installed", nargs="?", default="")
     plan = sub.add_parser("kernel-plan")
     plan.add_argument("mode", choices=("install", "remove"))
     plan.add_argument("items", nargs="+")
@@ -1811,6 +2062,19 @@ def main(argv: list[str]) -> int:
             print(os_switch(args.target))
         elif args.command == "os-restore":
             os_restore(args.backup)
+        elif args.command == "scan-clean":
+            found = []
+            if args.scope in {"all", "system"}:
+                found += scan_system()
+            if args.scope in {"all", "user"}:
+                found += scan_user()
+            print(json.dumps(found, indent=1))
+        elif args.command == "clean-user":
+            print(json.dumps(clean_user(args.items), indent=1))
+        elif args.command == "clean-system":
+            write_report("clean-system", clean_system(args.items))
+        elif args.command == "changelog":
+            print(changelog(args.package, args.installed))
         elif args.command == "kernel-plan":
             print("\n".join(kernel_plan(args.mode, args.items, args.headers)))
     except ToolError as exc:

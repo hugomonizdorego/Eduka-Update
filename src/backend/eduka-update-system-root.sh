@@ -1,5 +1,5 @@
 #!/bin/bash
-# Privileged helper for Eduka-Update-System 0.14. Do not launch directly.
+# Privileged helper for Eduka-Update-System 0.15. Do not launch directly.
 # It is the only program PolicyKit allows EUS to run as root.
 
 set -u
@@ -22,6 +22,11 @@ PAUSE_FILE='/etc/eus/pause'
 TIMER_OVERRIDE='/etc/systemd/system/eus-refresh.timer.d/override.conf'
 TOOL='/usr/local/libexec/eduka-update-system-tool'
 PYTHON='/usr/bin/python3'
+IGNORE_FILE='/etc/eus/ignored-updates'
+# Defaults; /etc/eus/eus.conf overrides them.
+AUTO_CLEAN=1
+TIMESHIFT_SNAPSHOT=0
+AUTO_UPGRADE='off'
 OS_RELEASE_PACKAGE='edukasaun-release'
 
 ACTION="${1:-}"
@@ -130,6 +135,9 @@ P_OS_CHECK='Checking for a new Edukasaun OS base release...'
 P_OS_PREPARE='Bringing the current release fully up to date...'
 P_OS_SWITCH='Switching repositories to the new release...'
 P_OS_UPGRADE='Upgrading the operating system (this can take a long time)...'
+P_SNAPSHOT='Creating a Timeshift snapshot before installing...'
+P_CLEAN='Cleaning up: unneeded packages, leftover configuration and package cache...'
+P_AUTO='Installing updates automatically...'
 P_OS_SPACE='Not enough free disk space for the OS upgrade (at least 5 GB is needed in / and /var).'
 
 progress() {
@@ -237,6 +245,70 @@ refresh_restart_state() {
     mv -f "$tmp" "$RESTART_FILE"
 }
 
+is_kernel_package() {
+    # is_kernel_package BINARY SOURCE SECTION
+    case "$1" in linux-libc-dev) return 1 ;; esac
+    case "$2" in linux|linux-signed*|linux-meta*|linux-latest|linux-hwe*) return 0 ;; esac
+    [[ "$3" == kernel ]] && [[ "$1" == linux-* ]]
+}
+
+is_ignored() {
+    # is_ignored NAME VERSION: entries in /etc/eus/ignored-updates are
+    # "name" (all versions) or "name=version"; shell globs are allowed.
+    local name="$1" version="$2" pattern pattern_name pattern_version
+    [[ -r "$IGNORE_FILE" ]] || return 1
+    while IFS= read -r pattern; do
+        pattern="${pattern%%#*}"
+        pattern="${pattern//[[:space:]]/}"
+        [[ -n "$pattern" ]] || continue
+        pattern_name="${pattern%%=*}"
+        pattern_version=''
+        [[ "$pattern" == *=* ]] && pattern_version="${pattern#*=}"
+        # shellcheck disable=SC2053
+        if [[ "$name" == $pattern_name ]] && [[ -z "$pattern_version" || "$pattern_version" == "$version" ]]; then
+            return 0
+        fi
+    done <"$IGNORE_FILE"
+    return 1
+}
+
+ignored_installed_packages() {
+    # Binary packages with a pending update that the ignore list excludes.
+    local line package source candidate key
+    local inst_re='^Inst ([^ ]+)( \[([^]]*)\])? \(([^ ]+) '
+    local -a held=()
+    [[ -s "$IGNORE_FILE" ]] || return 0
+    while IFS= read -r line; do
+        [[ "$line" =~ $inst_re ]] || continue
+        package="${BASH_REMATCH[1]}"
+        candidate="${BASH_REMATCH[4]}"
+        key="${package%%:*}"
+        source="$(dpkg-query -W -f='${source:Package}' "$key" 2>/dev/null || true)"
+        if is_ignored "${source:-$key}" "$candidate" || is_ignored "$key" "$candidate"; then
+            held+=("$package")
+        fi
+    done < <(LC_ALL=C apt-get -s -o Debug::NoLocking=1 full-upgrade 2>/dev/null)
+    printf '%s\n' "${held[@]}"
+}
+
+timeshift_snapshot() {
+    [[ "${TIMESHIFT_SNAPSHOT:-0}" == 1 ]] && command -v timeshift >/dev/null 2>&1 || return 0
+    progress 4 "$P_SNAPSHOT"
+    log_header 'Timeshift snapshot before installing updates'
+    timeout 3600 timeshift --create --scripted --tags O \
+        --comments 'Before Eduka-Update-System updates' >>"$LOG_FILE" 2>&1 || \
+        log_header 'Timeshift snapshot failed; continuing (see the lines above)'
+}
+
+post_clean() {
+    # After installing or removing packages, leave the system clean:
+    # unneeded dependencies, leftover configuration and downloaded .debs.
+    [[ "${AUTO_CLEAN:-1}" == 1 && -x "$PYTHON" && -r "$TOOL" ]] || return 0
+    progress 95 "$P_CLEAN"
+    log_header 'Automatic clean-up after the operation'
+    "$PYTHON" -I "$TOOL" clean-system autoremove configs apt-cache >>"$LOG_FILE" 2>&1 || true
+}
+
 is_medium_package() {
     case "$1" in
         linux-*|firmware-*|intel-microcode*|amd64-microcode*|grub-*|initramfs-*|systemd*|udev*|libc6*|libstdc++6*|dbus*|apt*|dpkg*|sudo*|polkit*|openssh-*|network-manager*|xserver-xorg*|mesa-*|libgl*|lxqt-*|pcmanfm-qt*|calamares*) return 0 ;;
@@ -293,7 +365,8 @@ calculate_updates() {
     local line package installed candidate archives size description category priority section key
     local installed_release candidate_release
     local -a packages=()
-    declare -A meta_size=() meta_priority=() meta_section=() meta_description=()
+    declare -A meta_size=() meta_priority=() meta_section=() meta_description=() meta_source=()
+    local source kind
     local inst_re='^Inst ([^ ]+)( \[([^]]*)\])? \(([^ ]+) (.*)\)'
 
     simulation="$(mktemp)"
@@ -315,17 +388,19 @@ calculate_updates() {
                 if (pkg != "" && !(pkg in seen)) {
                     seen[pkg] = 1
                     gsub(/\t/, " ", desc)
-                    printf "%s\t%s\t%s\t%s\t%s\n", pkg, size + 0, prio, sect, desc
+                    printf "%s\t%s\t%s\t%s\t%s\t%s\n", pkg, size + 0, prio, sect, src, desc
                 }
-                pkg = size = prio = sect = desc = ""
+                pkg = size = prio = sect = desc = src = ""
             }
             /^Package: / { flush(); pkg = substr($0, 10) }
+            /^Source: / { src = substr($0, 9); sub(/ .*/, "", src) }
             /^Size: / { size = substr($0, 7) }
             /^Priority: / { prio = substr($0, 11) }
             /^Section: / { sect = substr($0, 10) }
             /^Description(-[A-Za-z_@.-]+)?: / { if (desc == "") { sub(/^[^:]*: /, ""); desc = $0 } }
             END { flush() }' >"$metadata_file"
-        while IFS=$'\t' read -r key size priority section description; do
+        while IFS=$'\t' read -r key size priority section source description; do
+            meta_source["$key"]="${source:-$key}"
             meta_size["$key"]="$size"
             meta_priority["$key"]="$priority"
             meta_section["$key"]="$section"
@@ -348,12 +423,24 @@ calculate_updates() {
         priority="${meta_priority[$key]:-}"
         section="${meta_section[$key]:-}"
         description="${meta_description[$key]:-System package update}"
+        source="${meta_source[$key]:-$key}"
+        if is_ignored "$source" "$candidate" || is_ignored "$key" "$candidate"; then
+            continue
+        fi
+        kind='package'
+        is_kernel_package "$key" "$source" "$section" && kind='kernel'
 
         # APT lists every archive that carries the candidate version, so a
         # security fix also published in -updates is still recognised.
-        if [[ "$key" == "$OS_RELEASE_PACKAGE" || "${archives,,}" == *security* ]]; then
+        # Browsers and mail clients are treated as security updates (as Linux
+        # Mint does): nearly every release of them fixes vulnerabilities.
+        if [[ "$key" == "$OS_RELEASE_PACKAGE" || "${archives,,}" == *security* ]] || \
+           [[ "$source" =~ ^(firefox|firefox-esr|thunderbird|chromium)$ ]]; then
             category='critical'
-        elif is_medium_package "$key" || [[ "$priority" == 'required' || "$priority" == 'important' || "$section" == 'kernel' ]]; then
+            [[ "$kind" == kernel ]] || kind='security'
+        elif [[ "$kind" == kernel ]]; then
+            category='kernel'
+        elif is_medium_package "$key" || [[ "$priority" == 'required' || "$priority" == 'important' ]]; then
             category='medium'
         else
             category='normal'
@@ -362,8 +449,9 @@ calculate_updates() {
         installed="$(sanitize_field "$installed")"
         candidate="$(sanitize_field "$candidate")"
         description="$(sanitize_field "$description")"
-        printf '%s\tapt\t%s\t%s\t%s\t%s\t%s\n' \
-            "$category" "$package" "$installed" "$candidate" "$size" "$description" >>"$tsv_tmp"
+        source="$(sanitize_field "$source")"
+        printf '%s\tapt\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$category" "$package" "$installed" "$candidate" "$size" "$description" "$source" "$kind" >>"$tsv_tmp"
     done <"$simulation"
     rm -f "$metadata_file"
 
@@ -428,7 +516,7 @@ apt_update_command() {
     tmp="$(mktemp "$STATE_DIR/apt-update.XXXXXX")"
     # fd 4 keeps the caller's stdout (the progress protocol); without it the
     # progress stream inherited apt's redirection and never reached the GUI.
-    { apt-get -o Acquire::Retries=3 -o APT::Status-Fd=3 update \
+    { apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=120 -o APT::Status-Fd=3 update \
         >"$tmp" 2>&1 3> >(apt_progress_stream 8 55 63 1 >&4); } 4>&1
     rc=$?
     cat "$tmp" >>"$LOG_FILE"
@@ -477,6 +565,7 @@ apt_upgrade_command() {
     local -a range=(${UPGRADE_RANGE:-26 40 66 26})
     DEBIAN_FRONTEND=noninteractive apt-get \
         -o Acquire::Retries=3 \
+        -o DPkg::Lock::Timeout=300 \
         -o APT::Status-Fd=3 \
         -o Dpkg::Options::='--force-confdef' \
         -o Dpkg::Options::='--force-confold' \
@@ -487,12 +576,31 @@ upgrade_all_apt() {
     progress 5 "$P_REFRESH"
     log_header 'Full APT upgrade selected in EUS'
     apt_update_or_fail
+    timeshift_snapshot
     progress 26 "$P_UPGRADE"
-    apt_upgrade_command full-upgrade -y || \
+    full_upgrade_respecting_ignores || \
         fail 'The system upgrade did not finish successfully. See /var/log/eus/eus.log.'
-    progress 92 "$P_CALCULATE"
+    progress 90 "$P_CALCULATE"
     calculate_updates
+    post_clean
     progress 100 "$P_DONE"
+}
+
+full_upgrade_respecting_ignores() {
+    # Ignored updates are held only for the duration of this upgrade.
+    local rc package
+    local -a hold=()
+    mapfile -t hold < <(ignored_installed_packages | sed '/^$/d')
+    local -a newly_held=()
+    for package in "${hold[@]}"; do
+        if ! apt-mark showhold 2>/dev/null | grep -qx "$package"; then
+            apt-mark hold "$package" >>"$LOG_FILE" 2>&1 && newly_held+=("$package")
+        fi
+    done
+    apt_upgrade_command full-upgrade -y
+    rc=$?
+    ((${#newly_held[@]})) && apt-mark unhold "${newly_held[@]}" >>"$LOG_FILE" 2>&1
+    return "$rc"
 }
 
 install_selected_apt() {
@@ -518,13 +626,15 @@ install_selected_apt() {
         seen[$package]=1
     done
 
+    timeshift_snapshot
     progress 34 "$P_SELECTED"
     # --only-upgrade keeps APT's automatic/manual marks unchanged, so
     # dependencies upgraded here can still be autoremoved later.
     apt_upgrade_command install --only-upgrade -y "${selected[@]}" || \
         fail 'One or more selected updates could not be installed. See /var/log/eus/eus.log.'
-    progress 92 "$P_CALCULATE"
+    progress 90 "$P_CALCULATE"
     calculate_updates
+    post_clean
     progress 100 "$P_DONE"
 }
 
@@ -676,6 +786,111 @@ auto_refresh() {
         return 0
     fi
     refresh_lists
+    automatic_upgrade
+}
+
+on_battery_power() {
+    # True when the computer runs on battery (no AC adapter online).
+    local supply online=0 battery=0
+    for supply in /sys/class/power_supply/*; do
+        [[ -r "$supply/type" ]] || continue
+        case "$(<"$supply/type")" in
+            Mains|USB) [[ "$(<"$supply/online" 2>/dev/null)" == 1 ]] && online=1 ;;
+            Battery) battery=1 ;;
+        esac
+    done
+    ((battery == 1 && online == 0))
+}
+
+automatic_upgrade() {
+    # AUTO_UPGRADE=security|all installs updates after the scheduled check,
+    # only on AC power and while shutdown is inhibited (like mintupdate).
+    local -a packages=()
+    local inhibitor=''
+    case "${AUTO_UPGRADE:-off}" in security|all) ;; *) return 0 ;; esac
+    if on_battery_power; then
+        log_header 'Automatic upgrade skipped: running on battery'
+        return 0
+    fi
+    if [[ "$AUTO_UPGRADE" == security ]]; then
+        mapfile -t packages < <(awk -F '\t' '$2=="apt" && $1=="critical" {print $3}' "$TSV_FILE")
+    else
+        mapfile -t packages < <(awk -F '\t' '$2=="apt" {print $3}' "$TSV_FILE")
+    fi
+    ((${#packages[@]})) || return 0
+    log_header "Automatic upgrade ($AUTO_UPGRADE): ${#packages[@]} packages"
+    if command -v systemd-inhibit >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        systemd-inhibit --what=shutdown:sleep --mode=block --who='Eduka-Update-System' \
+            --why='Installing updates' sleep infinity &
+        inhibitor=$!
+    fi
+    progress 70 "$P_AUTO"
+    timeshift_snapshot
+    apt_upgrade_command install --only-upgrade -y "${packages[@]}" || \
+        log_header 'Automatic upgrade failed; see the lines above'
+    [[ -n "$inhibitor" ]] && kill "$inhibitor" 2>/dev/null
+    calculate_updates
+    post_clean
+}
+
+set_conf_value() {
+    # set_conf_value KEY VALUE: update /etc/eus/eus.conf, keeping other lines.
+    local key="$1" value="$2" tmp
+    install -d -m 0755 "${CONFIG_FILE%/*}"
+    touch "$CONFIG_FILE"
+    tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
+    grep -v "^${key}=" "$CONFIG_FILE" >"$tmp" || true
+    printf "%s='%s'\n" "$key" "$value" >>"$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$CONFIG_FILE"
+}
+
+set_option() {
+    local key="${EXTRA_ARGS[0]:-}" value="${EXTRA_ARGS[1]:-}"
+    case "$key:$value" in
+        AUTO_CLEAN:0|AUTO_CLEAN:1|TIMESHIFT_SNAPSHOT:0|TIMESHIFT_SNAPSHOT:1) ;;
+        AUTO_UPGRADE:off|AUTO_UPGRADE:security|AUTO_UPGRADE:all) ;;
+        *) fail 'Invalid EUS option.' ;;
+    esac
+    progress 30 "$P_SETTINGS"
+    set_conf_value "$key" "$value"
+    log_header "Option $key set to $value"
+    progress 100 "$P_DONE"
+}
+
+ignore_update() {
+    # ignore add|remove PATTERN (name, name=version; globs allowed)
+    local mode="${EXTRA_ARGS[0]:-}" pattern="${EXTRA_ARGS[1]:-}" tmp
+    [[ "$pattern" =~ ^[A-Za-z0-9*?.+:~_-]+(=[A-Za-z0-9.+:~_-]+)?$ ]] || fail 'Invalid ignore pattern.'
+    install -d -m 0755 "${IGNORE_FILE%/*}"
+    touch "$IGNORE_FILE"
+    tmp="$(mktemp "${IGNORE_FILE}.XXXXXX")"
+    grep -vxF -- "$pattern" "$IGNORE_FILE" >"$tmp" || true
+    case "$mode" in
+        add) printf '%s\n' "$pattern" >>"$tmp" ;;
+        remove) ;;
+        *) rm -f -- "$tmp"; fail 'Invalid ignore mode.' ;;
+    esac
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$IGNORE_FILE"
+    log_header "Ignore list: $mode $pattern"
+    progress 50 "$P_CALCULATE"
+    calculate_updates
+    progress 100 "$P_DONE"
+}
+
+clean_system() {
+    local item
+    ((${#EXTRA_ARGS[@]} > 0)) || fail 'Nothing was selected to clean.'
+    for item in "${EXTRA_ARGS[@]}"; do
+        case "$item" in
+            apt-cache|autoremove|configs|old-kernels|logs|crash|journal|flatpak) ;;
+            *) fail "Invalid clean-up item: $item" ;;
+        esac
+    done
+    log_header "System clean-up: ${EXTRA_ARGS[*]}"
+    run_tool clean-system "${EXTRA_ARGS[@]}"
+    calculate_updates
 }
 
 run_tool() {
@@ -791,6 +1006,7 @@ os_upgrade() {
     printf '%s\n' "$plan" >>"$LOG_FILE"
     grep -q '^  switch ' <<<"$plan" || fail 'No repository offers the new release yet.'
 
+    timeshift_snapshot
     progress 3 "$P_OS_PREPARE"
     apt_update_or_fail
     UPGRADE_RANGE='5 10 15 10' apt_upgrade_command full-upgrade -y || \
@@ -816,8 +1032,9 @@ os_upgrade() {
         fail 'The minimal upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run Upgrade OS again.'
     UPGRADE_RANGE='60 15 75 15' apt_upgrade_command full-upgrade -y || \
         fail 'The full upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run Upgrade OS again.'
-    progress 92 "$P_CALCULATE"
+    progress 90 "$P_CALCULATE"
     calculate_updates
+    post_clean
     os_check
     log_header "OS upgrade to $target finished"
     progress 100 "$P_DONE"
@@ -845,10 +1062,12 @@ kernel_install() {
     }
     rm -f -- "$errors"
     mapfile -t packages <<<"$plan"
+    timeshift_snapshot
     apt_upgrade_command install -y "${packages[@]}" || \
         fail 'The kernel could not be installed. See /var/log/eus/eus.log.'
-    progress 92 "$P_CALCULATE"
+    progress 90 "$P_CALCULATE"
     calculate_updates
+    post_clean
     progress 100 "$P_DONE"
 }
 
@@ -871,8 +1090,9 @@ kernel_remove() {
     mapfile -t packages <<<"$plan"
     apt_upgrade_command purge -y "${packages[@]}" || \
         fail 'The kernel could not be removed. See /var/log/eus/eus.log.'
-    progress 92 "$P_CALCULATE"
+    progress 90 "$P_CALCULATE"
     calculate_updates
+    post_clean
     progress 100 "$P_DONE"
 }
 
@@ -905,7 +1125,7 @@ case "$ACTION" in
     refresh|auto-refresh|sources-refresh|upgrade-apt|install-apt|install-flatpak-system) ;;
     set-interval|set-schedule|pause|clear-history|reboot) ;;
     fix-keys|fix-duplicates|add-key|add-repo|kernel-install|kernel-remove) ;;
-    os-check|os-upgrade) ;;
+    os-check|os-upgrade|clean|ignore|set-option) ;;
     *) echo 'Invalid EUS privileged action.' >&2; exit 64 ;;
 esac
 
@@ -931,6 +1151,9 @@ case "$ACTION" in
     add-repo) add_repo ;;
     os-check) progress 10 "$P_OS_CHECK"; os_check; progress 100 "$P_DONE" ;;
     os-upgrade) os_upgrade ;;
+    clean) clean_system ;;
+    ignore) ignore_update ;;
+    set-option) set_option ;;
     kernel-install) kernel_install ;;
     kernel-remove) kernel_remove ;;
     upgrade-apt) upgrade_all_apt ;;

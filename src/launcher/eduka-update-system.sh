@@ -5,7 +5,7 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.14'
+VERSION='0.15'
 GUI='/usr/local/libexec/eduka-update-system-gui'
 PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
@@ -326,7 +326,7 @@ Usage: eduka-update-system [OPTION]
 
 Graphical interface:
   --ui                         open the update manager (default)
-  --open kernel|key-fix|add-key|add-repo|upgrade-os|settings
+  --open kernel|key-fix|add-key|add-repo|upgrade-os|cleaner|settings
                                open the manager directly on one dialog
 
 Terminal:
@@ -344,6 +344,8 @@ Terminal:
                                add a repository; its GPG key is found and
                                installed automatically
   --check-os                   check for a new Debian base release
+  --clean                      clean the system (APT cache, unneeded
+                               packages, leftover configs, old logs)
   --upgrade-os                 show the repository plan and upgrade the OS
   --pause DAYS                 pause automatic checks and notifications
   --resume                     resume automatic checks
@@ -356,7 +358,7 @@ category_counts() {
     CRITICAL=0; MEDIUM=0; NORMAL=0; FLATPAK=0
     [[ -r "$TSV_FILE" ]] || return
     CRITICAL="$(awk -F '\t' '$1=="critical" {n++} END {print n+0}' "$TSV_FILE")"
-    MEDIUM="$(awk -F '\t' '$1=="medium" {n++} END {print n+0}' "$TSV_FILE")"
+    MEDIUM="$(awk -F '\t' '$1=="medium" || $1=="kernel" {n++} END {print n+0}' "$TSV_FILE")"
     NORMAL="$(awk -F '\t' '$1=="normal" {n++} END {print n+0}' "$TSV_FILE")"
     FLATPAK="$(awk -F '\t' '$1=="flatpak" {n++} END {print n+0}' "$TSV_FILE")"
 }
@@ -449,7 +451,9 @@ send_update_notification() {
     panel_status available --count "$total"
     combined="${VERSION}-${UPDATE_FINGERPRINT}-${USER_FLATPAK_HASH}"
     old=''; [[ -r "$last_file" ]] && old="$(<"$last_file")"
-    [[ "$old" == "$combined" ]] && return 0
+    if [[ "$old" == "$combined" ]]; then
+        update_reminder "$combined" || return 0
+    fi
     category_counts
     FLATPAK=$((FLATPAK + USER_FLATPAK_COUNT))
     printf -v body "$AVAILABLE" "$total" "$CRITICAL" "$MEDIUM" "$NORMAL" "$FLATPAK"
@@ -470,6 +474,30 @@ send_update_notification() {
             --urgency="$urgency" --expire-time=30000 "$APP_NAME" "$body" || true
     fi
     printf '%s\n' "$combined" >"$last_file"
+}
+
+update_reminder() {
+    # Like mintupdate's update tracker: if the same updates stay pending,
+    # remind after 2 days for security updates and 7 days otherwise, at most
+    # once a day. Returns 0 when a reminder is due.
+    local fingerprint="$1" cache_dir first_file day_file first now age limit=7
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    first_file="$cache_dir/pending-since"
+    day_file="$cache_dir/reminded-on"
+    now="$(date +%s)"
+    if [[ ! -r "$first_file" || "$(head -n1 "$first_file")" != "$fingerprint" ]]; then
+        printf '%s\n%s\n' "$fingerprint" "$now" >"$first_file"
+        return 1
+    fi
+    first="$(sed -n 2p "$first_file")"
+    [[ "$first" =~ ^[0-9]+$ ]] || return 1
+    age=$(((now - first) / 86400))
+    category_counts
+    ((CRITICAL > 0)) && limit=2
+    ((age >= limit)) || return 1
+    [[ -r "$day_file" && "$(<"$day_file")" == "$(date +%F)" ]] && return 1
+    date +%F >"$day_file"
+    return 0
 }
 
 send_restart_notification() {
@@ -647,7 +675,7 @@ case "$command_name" in
     --ui) launch_gui "$@" ;;
     --open)
         case "${1:-}" in
-            kernel|key-fix|add-key|add-repo|upgrade-os|settings) launch_gui --open "$1" ;;
+            kernel|key-fix|add-key|add-repo|upgrade-os|settings|cleaner) launch_gui --open "$1" ;;
             *) usage >&2; exit 64 ;;
         esac
         ;;
@@ -678,6 +706,12 @@ case "$command_name" in
         fi
         ;;
     --upgrade-os) terminal_os_upgrade ;;
+    --clean)
+        "$PYTHON" -I "$TOOL" scan-clean --scope system | "$PYTHON" -c 'import json, sys
+for item in json.load(sys.stdin):
+    print("  %-11s %8.1f MB  %s" % (item["id"], item["size"] / 1048576, item["title"]))'
+        invoke_root_terminal clean autoremove configs apt-cache logs crash
+        ;;
     --pause)
         [[ "${1:-}" =~ ^[0-9]+$ ]] || { usage >&2; exit 64; }
         invoke_root_terminal pause "$1"

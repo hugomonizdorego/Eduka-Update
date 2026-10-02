@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Qt 6 interface for Eduka-Update-System 0.14."""
+"""Qt 6 interface for Eduka-Update-System 0.15."""
 
 from __future__ import annotations
 
@@ -38,11 +38,13 @@ PAUSE_FILE = Path(os.environ.get("EUS_PAUSE_FILE", "/etc/eus/pause"))
 SCHEDULE_FILE = Path(os.environ.get("EUS_SCHEDULE_FILE", "/etc/eus/schedule"))
 APT_UPDATE_LOG = Path(os.environ.get("EUS_APT_UPDATE_LOG", "/var/lib/eus/apt-update.log"))
 REPORT_FILE = Path(os.environ.get("EUS_REPORT_FILE", "/var/lib/eus/repair-report.json"))
+CONFIG_FILE = Path(os.environ.get("EUS_CONFIG_FILE", "/etc/eus/eus.conf"))
+IGNORE_FILE = Path(os.environ.get("EUS_IGNORE_FILE", "/etc/eus/ignored-updates"))
 OS_UPGRADE_FILE = Path(os.environ.get("EUS_OS_UPGRADE_FILE", "/var/lib/eus/os-upgrade"))
 REPOSITORIES_FIXTURE = os.environ.get("EUS_REPOSITORIES_FIXTURE", "")
 OS_PLAN_FIXTURE = os.environ.get("EUS_OS_PLAN_FIXTURE", "")
 PANEL_STATUS = "/usr/local/bin/eus-panel-status"
-EUS_VERSION = "0.14"
+EUS_VERSION = "0.15"
 EUS_APP_ICON = "/usr/share/icons/hicolor/48x48/apps/eduka-update-system.png"
 EUS_ICON_DIR = "/usr/lib/EUS-ICONS"
 EUS_ICON_IDLE = f"{EUS_ICON_DIR}/eus-update-idle.png"
@@ -75,11 +77,12 @@ def parse_updates(path: Path) -> list[dict]:
     except OSError:
         return records
     for line in lines:
-        fields = line.split("\t", 6)
-        if len(fields) != 7:
+        fields = line.split("\t")
+        if len(fields) < 7:
             continue
-        category, source, name, installed, candidate, size, description = fields
-        if category not in {"critical", "medium", "normal", "flatpak"}:
+        category, source, name, installed, candidate, size, description = fields[:7]
+        srcpkg = fields[7] if len(fields) > 7 and fields[7] else name
+        if category not in {"critical", "kernel", "medium", "normal", "flatpak"}:
             continue
         if source not in {"apt", "flatpak-system", "flatpak-user"}:
             continue
@@ -89,7 +92,7 @@ def parse_updates(path: Path) -> list[dict]:
             size_bytes = parse_size(size)
         records.append({"category": category, "source": source, "name": name,
                         "installed": installed, "candidate": candidate,
-                        "size": size_bytes, "description": description})
+                        "size": size_bytes, "description": description, "srcpkg": srcpkg})
     return records
 
 
@@ -137,23 +140,24 @@ def scan_user_flatpaks() -> list[dict]:
 if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
     updates = parse_updates(Path(sys.argv[2]))
     result = {"total": len(updates), "bytes": sum(x["size"] for x in updates)}
-    for category in ("critical", "medium", "normal", "flatpak"):
+    for category in ("critical", "kernel", "medium", "normal", "flatpak"):
         result[category] = sum(x["category"] == category for x in updates)
+    result["groups"] = len({(x["source"], x["srcpkg"]) for x in updates})
     print(json.dumps(result, sort_keys=True))
     raise SystemExit(0)
 
 
 try:
-    from PyQt6.QtCore import (QFileSystemWatcher, QProcess, QProcessEnvironment, QSize, Qt,
+    from PyQt6.QtCore import (QFileSystemWatcher, QPoint, QProcess, QProcessEnvironment, QSize, Qt,
                               QTime, QTimer, pyqtSignal)
     from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QKeySequence, QShortcut
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
     from PyQt6.QtWidgets import (
         QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
         QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-        QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
+        QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
         QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QTimeEdit,
-        QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+        QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
     )
 except ImportError as exc:
     print(f"PyQt6 is required for the EUS graphical interface: {exc}", file=sys.stderr)
@@ -681,9 +685,77 @@ EXTRA_MESSAGES = {
 for _lang, _values in EXTRA_MESSAGES.items():
     MESSAGES[_lang].update(_values)
 
+# 0.15: compact Mint-style interface and System Cleaner (English; other
+# languages fall back to these texts where they have no translation).
+MESSAGES_015 = {
+        "tb_refresh": "Refresh", "tb_menu": "Menu", "install": "Install Updates",
+        "mm_select_all": "Select all", "mm_clear": "Clear selection",
+        "mm_select_security": "Select security and kernel updates only",
+        "mm_cleaner": "System Cleaner…", "mm_kernels": "Kernel Manager…", "mm_upgrade": "Upgrade OS…",
+        "mm_sources": "Software sources", "mm_keyfix": "Key Fix…", "mm_addrepo": "Add repository…",
+        "mm_addkey": "Add GPG key…", "history": "History", "settings": "Settings", "about": "About",
+        "col_type": "Type", "col_update": "Update",
+        "type_critical": "Security", "type_kernel": "Kernel", "type_medium": "Important",
+        "type_normal": "Regular", "type_flatpak": "Flatpak",
+        "tab_description": "Description", "tab_packages": "Packages", "tab_changelog": "Changelog",
+        "st_updates": "{count} updates available: {parts}",
+        "selected": "{count} selected · {size}",
+        "current": "Your system is up to date",
+        "empty": "No update information yet. Select Refresh.",
+        "choose": "Select an update to see its description.",
+        "sb_self_update": "A new version of the Update Manager is available. Install it before the other updates.",
+        "sb_install_first": "Install it now",
+        "banner_os": "Upgrade OS: {os} can move to Debian {version} \"{codename}\".",
+        "banner_repo": "Repository problem: {details}.", "banner_kernel": "{count} old kernel(s) can be removed.",
+        "banner_paused": "Automatic checks are paused until {date}.", "resume": "Resume",
+        "open_keyfix": "Fix it", "open_kernel": "Review", "open_upgrade": "Upgrade OS",
+        "restart_pending": "Restart required to finish installing updates", "restart_now": "Restart now",
+        "cm_ignore_version": "Ignore this version ({version})", "cm_ignore_all": "Ignore all future updates",
+        "cm_select_type": "Select only {type} updates",
+        "cg_loading": "Downloading the changelog…", "cg_none": "No changelog is available for this update.",
+        "cg_flatpak": "Flatpak applications do not publish a Debian changelog.",
+        "kernel": "Kernel updates",
+        "fix_kernel": "Updates the Linux kernel: hardware support, drivers and fixes.",
+        "risk_kernel": "The current kernel stays installed and can still be chosen in the boot menu.",
+        "recommend_kernel": "Restart after installing; remove old kernels later in Kernel Manager.",
+        "fix_critical": "Fixes published security vulnerabilities.",
+        "risk_critical": "Delaying leaves the computer exposed to known attacks.",
+        "recommend_critical": "Install as soon as possible.",
+        "fix_medium": "Updates an important system component.",
+        "risk_medium": "Delaying can keep crashes or hardware problems.",
+        "recommend_medium": "Install after saving your work.",
+        "fix_normal": "Bug fixes and improvements.", "risk_normal": "Low risk if postponed briefly.",
+        "recommend_normal": "Install during routine maintenance.",
+        "fix_flatpak": "Updates a sandboxed application or runtime.",
+        "risk_flatpak": "Close the application before updating.",
+        "recommend_flatpak": "Reopen the application afterwards.",
+        "cl_title": "System Cleaner",
+        "cl_intro": "Frees disk space safely: downloaded package files, packages that are no longer needed, leftover configuration of removed packages, old kernels (never the running one), old logs, crash reports and application caches. EUS also runs the package clean-up automatically after installing updates or removing kernels.",
+        "cl_col_item": "Item", "cl_col_detail": "Details", "cl_scan": "Scan again", "cl_clean": "Clean",
+        "cl_scanning": "Scanning…", "cl_nothing": "Nothing to clean: the system is already clean.",
+        "cl_total": "{count} item(s) selected · {size} will be freed",
+        "cl_confirm": "Clean the selected items and free about {size}?",
+        "cl_done": "Clean-up finished.", "cl_scope_system": "System (administrator)",
+        "cl_scope_user": "Your personal files",
+        "st_automation": "Automation", "st_auto_upgrade": "Install updates automatically",
+        "st_auto_off": "Never (notify only)", "st_auto_security": "Security updates only",
+        "st_auto_all": "All updates",
+        "st_auto_note": "Automatic updates run after the scheduled check, only on AC power, and block shutdown while installing.",
+        "st_auto_clean": "Clean up after installing updates or removing kernels",
+        "st_auto_clean_tip": "Removes packages that are no longer needed, leftover configuration of removed packages and downloaded package files.",
+        "st_timeshift": "Create a Timeshift snapshot before installing updates",
+        "st_timeshift_missing": "Create a Timeshift snapshot first (Timeshift is not installed)",
+        "st_ignored": "Ignored updates", "st_ignored_none": "No update is ignored.", "st_unignore": "Stop ignoring",
+}
+for _lang in MESSAGES:
+    for _key, _value in MESSAGES_015.items():
+        if _lang == "en" or _key not in EXTRA_MESSAGES.get(_lang, {}) and _key not in MESSAGES[_lang]:
+            MESSAGES[_lang][_key] = _value
+
 CATEGORY_COLORS = {
     "critical": ("#D92D20", "#FFF1F0", "#7A271A"),
-    "medium": ("#E6A700", "#FFF8E1", "#7A4D00"),
+    "kernel": ("#7C3AED", "#F5F3FF", "#4C1D95"),
+    "medium": ("#B7791F", "#FFF8E1", "#7A4D00"),
     "normal": ("#169B62", "#ECFDF3", "#075E3B"),
     "flatpak": ("#1677D2", "#EFF8FF", "#0B4A82"),
 }
@@ -883,6 +955,32 @@ def repo_problem_text(lang: str, scan: dict | None) -> str:
     return ", ".join(parts)
 
 
+def stop_background(process: "QProcess | None") -> None:
+    """Silence and stop a helper process whose dialog is going away."""
+    if process is None:
+        return
+    try:
+        process.blockSignals(True)
+        if process.state() != QProcess.ProcessState.NotRunning:
+            process.kill()
+            process.waitForFinished(1000)
+    except RuntimeError:
+        pass
+
+
+class BackgroundDialog(QDialog):
+    """Dialog that stops its helper processes when it closes."""
+
+    background_attributes = ("loader", "scanner", "user_cleaner")
+
+    def done(self, result: int) -> None:
+        for name in self.background_attributes:
+            stop_background(getattr(self, name, None))
+            if hasattr(self, name):
+                setattr(self, name, None)
+        super().done(result)
+
+
 def style_button_box(box: QDialogButtonBox) -> None:
     """Give standard dialog buttons the EUS look (primary for accept roles)."""
     for button in box.buttons():
@@ -1004,7 +1102,7 @@ class PrivilegedTask(QWidget):
         self.finished.emit(False, self.owner.failure_detail(exit_code, self.started_at))
 
 
-class KernelDialog(QDialog):
+class KernelDialog(BackgroundDialog):
     """Install a new kernel or safely remove old ones."""
 
     def __init__(self, owner: "UpdateWindow") -> None:
@@ -1253,7 +1351,7 @@ class KernelDialog(QDialog):
         self.load()
 
 
-class KeyFixDialog(QDialog):
+class KeyFixDialog(BackgroundDialog):
     """Diagnose and repair APT signing keys, keyrings and duplicate repositories."""
 
     def __init__(self, owner: "UpdateWindow") -> None:
@@ -1742,7 +1840,7 @@ class SettingsDialog(QDialog):
         self.changed = False
         self.schedule = read_schedule()
         self.setWindowTitle(self.t("settings_title"))
-        self.setMinimumWidth(660)
+        self.setMinimumWidth(600)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.addWidget(QLabel(self.t("settings_title"), objectName="dialogTitle"))
@@ -1766,7 +1864,10 @@ class SettingsDialog(QDialog):
         (self.daily_radio if self.schedule["mode"] == "daily" else self.interval_radio).setChecked(True)
         self.interval.activated.connect(lambda _i: self.interval_radio.setChecked(True))
         self.daily_time.timeChanged.connect(lambda _t: self.daily_radio.setChecked(True))
-        layout.addWidget(schedule_box)
+        self.tabs = QTabWidget()
+        schedule_page = QWidget()
+        schedule_layout = QVBoxLayout(schedule_page)
+        schedule_layout.addWidget(schedule_box)
 
         pause_box = QGroupBox(self.t("st_pause"))
         pause_layout = QVBoxLayout(pause_box)
@@ -1798,14 +1899,69 @@ class SettingsDialog(QDialog):
         pause_layout.addLayout(pause_row)
         pause_layout.addWidget(note)
         pause_layout.addLayout(action_row)
-        layout.addWidget(pause_box)
+        schedule_layout.addWidget(pause_box)
+        schedule_layout.addStretch(1)
+        self.tabs.addTab(schedule_page, self.t("st_schedule"))
 
         notify_box = QGroupBox(self.t("st_general"))
         notify_layout = QVBoxLayout(notify_box)
         self.notify = QCheckBox(self.t("notifications"))
         self.notify.setChecked(owner.notifier_enabled())
         notify_layout.addWidget(self.notify)
-        layout.addWidget(notify_box)
+
+        config = read_key_values(CONFIG_FILE)
+        self.options = {"AUTO_UPGRADE": config.get("AUTO_UPGRADE", "off"),
+                        "AUTO_CLEAN": config.get("AUTO_CLEAN", "1"),
+                        "TIMESHIFT_SNAPSHOT": config.get("TIMESHIFT_SNAPSHOT", "0")}
+        automation_page = QWidget()
+        automation_layout = QVBoxLayout(automation_page)
+        automation_box = QGroupBox(self.t("st_automation"))
+        auto_layout = QVBoxLayout(automation_box)
+        auto_layout.setSpacing(8)
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel(self.t("st_auto_upgrade")))
+        self.auto_upgrade = QComboBox()
+        for value in ("off", "security", "all"):
+            self.auto_upgrade.addItem(self.t("st_auto_" + value), value)
+        self.auto_upgrade.setCurrentIndex(max(0, self.auto_upgrade.findData(self.options["AUTO_UPGRADE"])))
+        auto_row.addWidget(self.auto_upgrade, 1)
+        auto_layout.addLayout(auto_row)
+        auto_note = QLabel(self.t("st_auto_note"), objectName="muted")
+        auto_note.setWordWrap(True)
+        auto_note.setMinimumHeight(auto_note.fontMetrics().lineSpacing() * 2 + 4)
+        auto_layout.addWidget(auto_note)
+        self.auto_clean = QCheckBox(self.t("st_auto_clean"))
+        self.auto_clean.setChecked(self.options["AUTO_CLEAN"] == "1")
+        self.auto_clean.setToolTip(self.t("st_auto_clean_tip"))
+        has_timeshift = bool(shutil.which("timeshift"))
+        self.timeshift = QCheckBox(self.t("st_timeshift" if has_timeshift else "st_timeshift_missing"))
+        self.timeshift.setChecked(self.options["TIMESHIFT_SNAPSHOT"] == "1")
+        self.timeshift.setEnabled(has_timeshift)
+        for widget in (self.auto_clean, self.timeshift):
+            widget.setStyleSheet("QCheckBox { font-weight: normal; }")
+            auto_layout.addWidget(widget)
+        automation_layout.addWidget(automation_box)
+        automation_layout.addWidget(notify_box)
+        automation_layout.addStretch(1)
+        self.tabs.addTab(automation_page, self.t("st_automation"))
+
+        ignored_page = QWidget()
+        ignored_layout = QVBoxLayout(ignored_page)
+        self.ignored = QTreeWidget()
+        self.ignored.setHeaderHidden(True)
+        self.ignored.setRootIsDecorated(False)
+        ignored_layout.addWidget(self.ignored, 1)
+        unignore_row = QHBoxLayout()
+        unignore_row.addStretch(1)
+        self.unignore_button = QPushButton(self.t("st_unignore"), objectName="secondaryButton")
+        self.unignore_button.clicked.connect(self.unignore)
+        unignore_row.addWidget(self.unignore_button)
+        ignored_layout.addLayout(unignore_row)
+        self.tabs.addTab(ignored_page, self.t("st_ignored"))
+        layout.addWidget(self.tabs, 1)
+        self.load_ignored()
+        # Used when documenting the dialog (EUS_SETTINGS_TAB=1 opens Automation).
+        self.tabs.setCurrentIndex(int(os.environ.get("EUS_SETTINGS_TAB", "0") or 0))
 
         self.task = PrivilegedTask(owner, self)
         self.task.finished.connect(self.task_finished)
@@ -1819,6 +1975,7 @@ class SettingsDialog(QDialog):
         style_button_box(buttons)
         layout.addWidget(buttons)
         self.after_task = ""
+        self.queue: list[tuple[str, list[str]]] = []
         self.update_pause_status()
 
     def reject(self) -> None:
@@ -1843,19 +2000,54 @@ class SettingsDialog(QDialog):
         if self.task.start("pause", [str(days)], self.t("working")):
             self.update_pause_status()
 
+    def load_ignored(self) -> None:
+        self.ignored.clear()
+        try:
+            patterns = [line.split("#", 1)[0].strip()
+                        for line in IGNORE_FILE.read_text(encoding="utf-8").splitlines()]
+        except OSError:
+            patterns = []
+        for pattern in filter(None, patterns):
+            self.ignored.addTopLevelItem(QTreeWidgetItem([pattern]))
+        if not self.ignored.topLevelItemCount():
+            empty = QTreeWidgetItem([self.t("st_ignored_none")])
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.ignored.addTopLevelItem(empty)
+        self.unignore_button.setEnabled(bool(patterns))
+
+    def unignore(self) -> None:
+        item = self.ignored.currentItem()
+        if item is None or not item.flags() & Qt.ItemFlag.ItemIsEnabled:
+            return
+        self.after_task = "ignore"
+        self.task.start("ignore", ["remove", item.text(0)], self.t("working"))
+
     def save(self) -> None:
         self.owner.set_notifier_enabled(self.notify.isChecked())
+        self.queue = []
         if self.daily_radio.isChecked():
             new = ("daily", self.daily_time.time().toString("HH:mm"))
             old = ("daily", self.schedule["daily"]) if self.schedule["mode"] == "daily" else None
         else:
             new = ("interval", str(self.interval.currentData()))
             old = ("interval", str(self.schedule["hours"])) if self.schedule["mode"] == "interval" else None
-        if new == old:
+        if new != old:
+            self.queue.append(("set-schedule", list(new)))
+        wanted = {"AUTO_UPGRADE": str(self.auto_upgrade.currentData()),
+                  "AUTO_CLEAN": "1" if self.auto_clean.isChecked() else "0",
+                  "TIMESHIFT_SNAPSHOT": "1" if self.timeshift.isChecked() else "0"}
+        for key, value in wanted.items():
+            if value != self.options[key]:
+                self.queue.append(("set-option", [key, value]))
+        self.run_queue()
+
+    def run_queue(self) -> None:
+        if not self.queue:
             self.accept()
             return
-        self.after_task = "schedule"
-        if self.task.start("set-schedule", list(new), self.owner.t("saving")):
+        action, args = self.queue.pop(0)
+        self.after_task = "save"
+        if self.task.start(action, args, self.owner.t("saving")):
             self.buttons.setEnabled(False)
 
     def task_finished(self, success: bool, detail: str) -> None:
@@ -1865,8 +2057,10 @@ class SettingsDialog(QDialog):
         if not success:
             QMessageBox.critical(self, self.t("settings_title"), detail)
             return
-        if self.after_task == "schedule":
-            self.accept()
+        if self.after_task == "ignore":
+            self.load_ignored()
+        elif self.after_task == "save":
+            self.run_queue()
 
 
 def read_os_upgrade() -> dict[str, str]:
@@ -2013,7 +2207,7 @@ class AddRepoDialog(QDialog):
         self.accept()
 
 
-class UpgradeOSDialog(QDialog):
+class UpgradeOSDialog(BackgroundDialog):
     """Move Edukasaun OS to a new Debian stable base release."""
 
     def __init__(self, owner: "UpdateWindow") -> None:
@@ -2153,6 +2347,220 @@ class UpgradeOSDialog(QDialog):
         self.accept()
 
 
+CATEGORY_LABELS = {"critical": "Security", "kernel": "Kernel", "medium": "Important",
+                   "normal": "Regular", "flatpak": "Flatpak"}
+CATEGORY_RANK = {"critical": 0, "kernel": 1, "medium": 2, "normal": 3, "flatpak": 4}
+SELF_PACKAGE = "eduka-update-system"
+
+
+def group_updates(records: list[dict]) -> list[dict]:
+    """Group binary packages by source package, like mintupdate does: one row
+    for e.g. all WebKitGTK libraries built from webkit2gtk."""
+    groups: dict[tuple[str, str], dict] = {}
+    for record in records:
+        if record["source"] == "apt":
+            key = ("apt", record.get("srcpkg") or record["name"])
+        else:
+            key = (record["source"], record["name"])
+        group = groups.get(key)
+        if group is None:
+            group = {"key": key, "name": key[1], "source": record["source"], "packages": [],
+                     "category": record["category"], "size": 0, "main": record}
+            groups[key] = group
+        group["packages"].append(record)
+        group["size"] += record["size"]
+        if CATEGORY_RANK.get(record["category"], 9) < CATEGORY_RANK.get(group["category"], 9):
+            group["category"] = record["category"]
+        if record["name"] == key[1]:
+            group["main"] = record
+    for group in groups.values():
+        main = group["main"]
+        if len(group["packages"]) == 1:
+            group["name"] = main["name"]
+        group["installed"] = main["installed"]
+        group["candidate"] = main["candidate"]
+        group["description"] = main["description"]
+        group["self_update"] = any(p["name"] == SELF_PACKAGE for p in group["packages"])
+        if group["category"] == "kernel" and len(group["packages"]) > 1:
+            group["name"] = f"Linux kernel {group['candidate']}"
+    return sorted(groups.values(), key=lambda g: (not g["self_update"], CATEGORY_RANK.get(g["category"], 9),
+                                                   g["name"]))
+
+
+class CleanerDialog(BackgroundDialog):
+    """System Cleaner: APT cache, unneeded packages, leftover configuration,
+    old kernels, logs, crash reports and per-user caches."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.items: list[dict] = []
+        self.scanner: QProcess | None = None
+        self.user_cleaner: QProcess | None = None
+        self.setWindowTitle(self.t("cl_title"))
+        self.resize(720, 520)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel(self.t("cl_title"), objectName="dialogTitle"))
+        intro = QLabel(self.t("cl_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.tree = QTreeWidget(objectName="kernelTree")
+        self.tree.setColumnCount(3)
+        self.tree.setHeaderLabels([self.t("cl_col_item"), self.t("size"), self.t("cl_col_detail")])
+        self.tree.setRootIsDecorated(True)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setStretchLastSection(True)
+        self.tree.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.tree.itemChanged.connect(lambda *_: self.update_total())
+        layout.addWidget(self.tree, 1)
+        self.total = QLabel(objectName="bannerText")
+        layout.addWidget(self.total)
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.system_cleaned)
+        layout.addWidget(self.task)
+        buttons = QHBoxLayout()
+        self.scan_button = QPushButton(self.t("cl_scan"), objectName="secondaryButton")
+        self.scan_button.clicked.connect(self.scan)
+        self.clean_button = QPushButton(self.t("cl_clean"), objectName="primaryButton")
+        self.clean_button.clicked.connect(self.clean)
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
+        close.clicked.connect(self.reject)
+        buttons.addWidget(self.scan_button)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self.clean_button)
+        layout.addLayout(buttons)
+        self.scan()
+
+    def reject(self) -> None:
+        if not self.task.running() and self.user_cleaner is None:
+            super().reject()
+
+    def scan(self) -> None:
+        if self.scanner is not None:
+            return
+        self.tree.clear()
+        self.total.setText(self.t("cl_scanning"))
+        self.clean_button.setEnabled(False)
+        fixture = os.environ.get("EUS_CLEAN_FIXTURE")
+        if fixture:
+            try:
+                self.populate(json.loads(Path(fixture).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                self.populate([])
+            return
+        self.scanner = QProcess(self)
+        self.scanner.finished.connect(self.scanned)
+        self.scanner.errorOccurred.connect(lambda _e: self.scanned(1))
+        command = tool_command("scan-clean")
+        self.scanner.start(command[0], command[1:])
+
+    def scanned(self, exit_code: int, _status=None) -> None:
+        if self.scanner is None:
+            return
+        scanner, self.scanner = self.scanner, None
+        try:
+            data = json.loads(bytes(scanner.readAllStandardOutput()).decode("utf-8", "replace")) \
+                if exit_code == 0 else []
+        except ValueError:
+            data = []
+        scanner.deleteLater()
+        self.populate(data)
+
+    def populate(self, items: list[dict]) -> None:
+        self.items = items
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        for scope in ("system", "user"):
+            scoped = [i for i in items if i.get("scope") == scope]
+            if not scoped:
+                continue
+            group = QTreeWidgetItem([self.t("cl_scope_" + scope)])
+            group.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            font = group.font(0)
+            font.setBold(True)
+            group.setFont(0, font)
+            self.tree.addTopLevelItem(group)
+            group.setFirstColumnSpanned(True)
+            for item in scoped:
+                row = QTreeWidgetItem(group, [item["title"], format_bytes(item["size"]) if item["size"] else "—",
+                                              item.get("detail", "")])
+                row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                row.setCheckState(0, Qt.CheckState.Checked if item.get("default") else Qt.CheckState.Unchecked)
+                row.setData(0, Qt.ItemDataRole.UserRole, item)
+                row.setToolTip(2, item.get("detail", ""))
+            group.setExpanded(True)
+        self.tree.blockSignals(False)
+        if not items:
+            self.total.setText(self.t("cl_nothing"))
+        self.update_total()
+
+    def checked(self) -> list[dict]:
+        result = []
+        for index in range(self.tree.topLevelItemCount()):
+            group = self.tree.topLevelItem(index)
+            for child in range(group.childCount()):
+                row = group.child(child)
+                if row.checkState(0) == Qt.CheckState.Checked:
+                    result.append(row.data(0, Qt.ItemDataRole.UserRole))
+        return result
+
+    def update_total(self) -> None:
+        selected = self.checked()
+        if self.items:
+            self.total.setText(self.t("cl_total", count=len(selected),
+                                      size=format_bytes(sum(i["size"] for i in selected))))
+        self.clean_button.setEnabled(bool(selected) and not self.task.running())
+
+    def clean(self) -> None:
+        selected = self.checked()
+        if not selected:
+            return
+        answer = QMessageBox.question(self, self.t("cl_title"),
+                                      self.t("cl_confirm", size=format_bytes(sum(i["size"] for i in selected))),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.clean_button.setEnabled(False)
+        self.pending_system = [i["id"] for i in selected if i["scope"] == "system"]
+        user_items = [i["id"] for i in selected if i["scope"] == "user"]
+        if user_items:
+            # Personal caches belong to the user: no administrator rights needed.
+            self.user_cleaner = QProcess(self)
+            self.user_cleaner.finished.connect(self.user_cleaned)
+            self.user_cleaner.errorOccurred.connect(lambda _e: self.user_cleaned(1))
+            command = tool_command("clean-user", *user_items)
+            self.user_cleaner.start(command[0], command[1:])
+        else:
+            self.start_system_clean()
+
+    def user_cleaned(self, _exit_code: int, _status=None) -> None:
+        if self.user_cleaner is not None:
+            self.user_cleaner.deleteLater()
+            self.user_cleaner = None
+        self.start_system_clean()
+
+    def start_system_clean(self) -> None:
+        if self.pending_system:
+            if not self.task.start("clean", self.pending_system, self.t("working")):
+                self.scan()
+        else:
+            self.system_cleaned(True, "")
+
+    def system_cleaned(self, success: bool, detail: str) -> None:
+        self.changed = True
+        if not success:
+            QMessageBox.critical(self, self.t("cl_title"), detail)
+        else:
+            QMessageBox.information(self, self.t("cl_title"), self.t("cl_done"))
+        self.scan()
+
+
 class UpdateWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -2161,6 +2569,7 @@ class UpdateWindow(QMainWindow):
         version_data = read_key_values(VERSION_FILE)
         self.version = version_data.get("VERSION", EUS_VERSION)
         self.records: list[dict] = []
+        self.groups: list[dict] = []
         self.package_items: list[QTreeWidgetItem] = []
         self.progress_widgets: dict[tuple[str, str], QProgressBar] = {}
         self.active_progress_keys: list[tuple[str, str]] = []
@@ -2174,6 +2583,8 @@ class UpdateWindow(QMainWindow):
         self.process_was_timed_out = False
         self.external_busy = False
         self.kernel_probe: QProcess | None = None
+        self.changelog_process: QProcess | None = None
+        self.changelog_cache: dict[str, str] = {}
         self.process_timeout = QTimer(self)
         self.process_timeout.setSingleShot(True)
         self.process_timeout.timeout.connect(self.stop_stalled_process)
@@ -2184,12 +2595,10 @@ class UpdateWindow(QMainWindow):
         self.reload_timer.setSingleShot(True)
         self.reload_timer.setInterval(1500)
         self.reload_timer.timeout.connect(self.reload_from_disk)
-        self.setWindowTitle("Eduka-Update-System")
+        self.setWindowTitle("Update Manager — Eduka-Update-System")
         self.setWindowIcon(QIcon(EUS_APP_ICON))
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.resize(920, 740)
-        self.setMinimumSize(700, 520)
-        self.build_menu()
+        self.resize(760, 540)
+        self.setMinimumSize(560, 400)
         self.build_ui()
         self.apply_style()
         self.setup_window_shortcuts()
@@ -2202,12 +2611,12 @@ class UpdateWindow(QMainWindow):
 
     # ------------------------------------------------------------------ UI
     def setup_window_shortcuts(self) -> None:
-        self.fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
-        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
-        self.minimize_shortcut = QShortcut(QKeySequence("Ctrl+M"), self)
-        self.minimize_shortcut.activated.connect(self.showMinimized)
-        self.escape_shortcut = QShortcut(QKeySequence("Escape"), self)
-        self.escape_shortcut.activated.connect(self.leave_fullscreen)
+        for sequence, handler in (("F11", self.toggle_fullscreen), ("Ctrl+M", self.showMinimized),
+                                  ("Escape", self.leave_fullscreen), ("Ctrl+R", self.check_updates),
+                                  ("F5", self.check_updates), ("Ctrl+I", self.install_updates),
+                                  ("Ctrl+Q", self.close), ("Ctrl+H", self.show_history)):
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.activated.connect(handler)
 
     def toggle_fullscreen(self) -> None:
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
@@ -2216,64 +2625,54 @@ class UpdateWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
 
-    def build_menu(self) -> None:
-        bar = self.menuBar()
-        bar.setObjectName("mainMenu")
-        updates = bar.addMenu(self.t("menu_updates"))
-        self.check_action = QAction(self.t("check_updates"), self)
-        self.check_action.setShortcut(QKeySequence("Ctrl+R"))
-        self.check_action.triggered.connect(self.check_updates)
-        self.install_action = QAction(self.t("install"), self)
-        self.install_action.setShortcut(QKeySequence("Ctrl+I"))
-        self.install_action.triggered.connect(self.install_updates)
-        self.select_action = QAction(self.t("action_select_all"), self)
-        self.select_action.setShortcut(QKeySequence("Ctrl+A"))
-        self.select_action.triggered.connect(lambda: self.select_all.setChecked(True))
-        self.history_action = QAction(self.t("history"), self)
-        self.history_action.setShortcut(QKeySequence("Ctrl+H"))
-        self.history_action.triggered.connect(self.show_history)
-        quit_action = QAction(self.t("action_quit"), self)
-        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
-        quit_action.triggered.connect(self.close)
-        for action in (self.check_action, self.install_action, self.select_action):
-            updates.addAction(action)
-        updates.addSeparator()
-        updates.addAction(self.history_action)
-        updates.addSeparator()
-        updates.addAction(quit_action)
-        # Kernel, Key Fix, Add Key and Settings open their dialog directly on click.
-        self.kernel_action = bar.addAction(self.t("menu_kernel"))
-        self.kernel_action.triggered.connect(self.show_kernels)
-        self.keyfix_action = bar.addAction(self.t("menu_keyfix"))
-        self.keyfix_action.triggered.connect(self.show_key_fix)
-        self.addkey_action = bar.addAction(self.t("menu_addkey"))
-        self.addkey_action.triggered.connect(self.show_add_key)
-        self.addrepo_action = bar.addAction(self.t("menu_addrepo"))
-        self.addrepo_action.triggered.connect(self.show_add_repo)
-        self.settings_action = bar.addAction(self.t("menu_settings"))
-        self.settings_action.triggered.connect(self.show_settings)
-        # Shown only while a new Debian base release is available.
-        self.upgrade_action = bar.addAction(self.t("menu_upgrade"))
-        self.upgrade_action.triggered.connect(self.show_upgrade_os)
-        self.upgrade_action.setVisible(False)
-        help_menu = bar.addMenu(self.t("menu_help"))
-        log_action = QAction(self.t("action_log"), self)
-        log_action.triggered.connect(self.show_log)
-        about_action = QAction(self.t("about"), self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(log_action)
-        help_menu.addAction(about_action)
-        self.busy_actions = [self.check_action, self.install_action, self.history_action,
-                             self.kernel_action, self.keyfix_action, self.addkey_action,
-                             self.addrepo_action, self.settings_action, self.upgrade_action]
+    def build_main_menu(self) -> QMenu:
+        """Every secondary feature lives in this single menu."""
+        menu = QMenu(self)
+
+        def add(text: str, handler, shortcut: str = "") -> QAction:
+            action = menu.addAction(text)
+            action.triggered.connect(handler)
+            if shortcut:
+                action.setShortcut(QKeySequence(shortcut))
+            return action
+
+        self.select_all_action = add(self.t("mm_select_all"), lambda: self.set_all_checked(True))
+        self.clear_action = add(self.t("mm_clear"), lambda: self.set_all_checked(False))
+        self.select_security_action = add(self.t("mm_select_security"), self.select_security_only)
+        menu.addSeparator()
+        self.cleaner_action = add(self.t("mm_cleaner"), self.show_cleaner)
+        self.kernel_action = add(self.t("mm_kernels"), self.show_kernels)
+        self.upgrade_action = add(self.t("mm_upgrade"), self.show_upgrade_os)
+        menu.addSeparator()
+        sources = menu.addMenu(self.t("mm_sources"))
+        for text, handler in ((self.t("mm_keyfix"), self.show_key_fix),
+                              (self.t("mm_addrepo"), self.show_add_repo),
+                              (self.t("mm_addkey"), self.show_add_key)):
+            action = sources.addAction(text)
+            action.triggered.connect(handler)
+        self.sources_menu = sources
+        menu.addSeparator()
+        self.history_action = add(self.t("history"), self.show_history, "Ctrl+H")
+        self.settings_action = add(self.t("settings"), self.show_settings)
+        add(self.t("action_log"), self.show_log)
+        add(self.t("about"), self.show_about)
+        menu.addSeparator()
+        add(self.t("action_quit"), self.close, "Ctrl+Q")
+        self.busy_actions = [self.select_all_action, self.clear_action, self.select_security_action,
+                             self.cleaner_action, self.kernel_action, self.upgrade_action,
+                             self.history_action, self.settings_action, sources.menuAction()]
+        return menu
 
     def make_banner(self, kind: str, button_text: str, handler) -> tuple[QFrame, QLabel, QPushButton]:
         frame = QFrame(objectName=f"banner_{kind}")
         row = QHBoxLayout(frame)
-        row.setContentsMargins(12, 7, 8, 7)
+        row.setContentsMargins(10, 3, 4, 3)
+        row.setSpacing(6)
         label = QLabel(objectName="bannerText")
-        label.setWordWrap(True)
-        button = QPushButton(button_text, objectName="bannerButton")
+        label.setWordWrap(False)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        button = QPushButton(button_text, objectName="linkButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(handler)
         row.addWidget(label, 1)
         row.addWidget(button)
@@ -2281,227 +2680,197 @@ class UpdateWindow(QMainWindow):
         return frame, label, button
 
     def build_ui(self) -> None:
-        central = QWidget()
+        central = QWidget(objectName="body")
         self.setCentralWidget(central)
         outer = QVBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        header = QFrame(objectName="header")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 12, 18, 12)
-        header_layout.setSpacing(12)
+        toolbar = QFrame(objectName="toolbar")
+        bar = QHBoxLayout(toolbar)
+        bar.setContentsMargins(10, 6, 8, 6)
+        bar.setSpacing(6)
         icon = QLabel()
-        icon.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(42, 42)))
-        header_layout.addWidget(icon)
-        title_box = QVBoxLayout()
-        title_box.setSpacing(1)
-        title_box.addWidget(QLabel("Eduka-Update-System", objectName="appTitle"))
-        title_box.addWidget(QLabel(self.t("subtitle"), objectName="subtitle"))
-        header_layout.addLayout(title_box, 1)
-        header_layout.addWidget(QLabel(f"v{self.version}", objectName="versionChip"))
-        outer.addWidget(header)
+        icon.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(22, 22)))
+        bar.addWidget(icon)
+        self.status_title = QLabel(objectName="statusTitle")
+        self.status_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        bar.addWidget(self.status_title, 1)
+        self.check_button = QPushButton(self.t("tb_refresh"), objectName="secondaryButton")
+        self.check_button.setToolTip(self.t("check_updates") + " (Ctrl+R)")
+        self.check_button.clicked.connect(self.check_updates)
+        self.install_button = QPushButton(self.t("install"), objectName="primaryButton")
+        self.install_button.clicked.connect(self.install_updates)
+        self.menu_button = QToolButton(objectName="menuButton")
+        self.menu_button.setText("☰")
+        self.menu_button.setToolTip(self.t("tb_menu"))
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu_button.setMenu(self.build_main_menu())
+        bar.addWidget(self.check_button)
+        bar.addWidget(self.install_button)
+        bar.addWidget(self.menu_button)
+        outer.addWidget(toolbar)
 
-        body = QWidget(objectName="body")
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(16, 12, 16, 12)
-        body_layout.setSpacing(9)
-
-        self.pause_banner, self.pause_label, _ = self.make_banner("pause", self.t("resume"), self.resume_updates)
-        self.repo_banner, self.repo_label, _ = self.make_banner("repo", self.t("open_keyfix"), self.show_key_fix)
-        self.kernel_banner, self.kernel_label, _ = self.make_banner("kernel", self.t("open_kernel"),
-                                                                    self.show_kernels)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(8, 6, 8, 0)
+        layout.setSpacing(4)
+        self.self_banner, self.self_label, _ = self.make_banner("self", self.t("sb_install_first"),
+                                                               self.install_self_update)
+        self.os_banner, self.os_label, _ = self.make_banner("os", self.t("open_upgrade"), self.show_upgrade_os)
         self.restart_banner, self.restart_label, _ = self.make_banner("restart", self.t("restart_now"),
                                                                       self.confirm_reboot)
-        self.os_banner, self.os_label, _ = self.make_banner("os", self.t("open_upgrade"), self.show_upgrade_os)
-        for banner in (self.os_banner, self.restart_banner, self.repo_banner, self.pause_banner,
-                       self.kernel_banner):
-            body_layout.addWidget(banner)
-
-        status_card = QFrame(objectName="statusCard")
-        status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(14, 10, 14, 10)
-        status_column = QVBoxLayout()
-        status_column.setSpacing(2)
-        self.status_title = QLabel(objectName="statusTitle")
-        self.status_title.setWordWrap(True)
-        self.last_checked = QLabel(objectName="muted")
-        self.schedule_label = QLabel(objectName="muted")
-        status_column.addWidget(self.status_title)
-        status_column.addWidget(self.last_checked)
-        status_column.addWidget(self.schedule_label)
-        status_layout.addLayout(status_column, 1)
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
-        self.chips: dict[str, QLabel] = {}
-        for category in CATEGORY_ORDER:
-            chip = QLabel(objectName=f"chip_{category}")
-            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            chips.addWidget(chip)
-            self.chips[category] = chip
-        status_layout.addLayout(chips)
-        body_layout.addWidget(status_card)
-
-        self.global_progress = QProgressBar(objectName="globalProgress")
-        self.global_progress.setRange(0, 0)
-        self.global_progress.setTextVisible(False)
-        self.global_progress.setFixedHeight(4)
-        self.global_progress.hide()
-        self.progress_detail = QLabel(objectName="progressDetail")
-        self.progress_detail.setWordWrap(True)
-        self.progress_detail.hide()
-        body_layout.addWidget(self.global_progress)
-        body_layout.addWidget(self.progress_detail)
+        self.repo_banner, self.repo_label, _ = self.make_banner("repo", self.t("open_keyfix"), self.show_key_fix)
+        self.pause_banner, self.pause_label, _ = self.make_banner("pause", self.t("resume"), self.resume_updates)
+        self.kernel_banner, self.kernel_label, _ = self.make_banner("kernel", self.t("open_kernel"),
+                                                                    self.show_kernels)
+        self.banners = [self.self_banner, self.os_banner, self.restart_banner, self.repo_banner,
+                        self.pause_banner, self.kernel_banner]
+        for banner in self.banners:
+            layout.addWidget(banner)
 
         self.tree = QTreeWidget(objectName="updatesTree")
         self.tree.setColumnCount(5)
-        self.tree.setHeaderLabels([self.t("package"), self.t("installed"), self.t("new"),
-                                   self.t("size"), self.t("progress")])
-        self.tree.setRootIsDecorated(True)
+        self.tree.setHeaderLabels([self.t("col_type"), self.t("col_update"), self.t("new"), self.t("size"),
+                                   self.t("progress")])
+        self.tree.setRootIsDecorated(False)
         self.tree.setUniformRowHeights(True)
-        self.tree.setAlternatingRowColors(False)
-        self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.tree.setMinimumHeight(150)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.show_context_menu)
         header_view = self.tree.header()
-        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in (1, 2, 3):
-            header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.tree.setColumnWidth(4, 154)
+        self.tree.setColumnWidth(4, 120)
+        self.tree.setColumnHidden(4, True)
         self.tree.itemChanged.connect(self.selection_changed)
         self.tree.currentItemChanged.connect(self.show_description)
 
-        details = QFrame(objectName="detailsBox")
-        details_layout = QVBoxLayout(details)
-        details_layout.setContentsMargins(12, 9, 12, 10)
-        details_layout.setSpacing(5)
-        details_layout.addWidget(QLabel(self.t("details"), objectName="detailsTitle"))
+        self.details = QTabWidget(objectName="details")
         self.description = QLabel(self.t("choose"))
         self.description.setTextFormat(Qt.TextFormat.RichText)
         self.description.setWordWrap(True)
         self.description.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.description.setMinimumHeight(62)
-        details_layout.addWidget(self.description, 1)
+        self.description.setContentsMargins(8, 6, 8, 6)
+        self.description.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.packages_view = QPlainTextEdit()
+        self.packages_view.setReadOnly(True)
+        self.packages_view.setFont(mono_font())
+        self.changelog_view = QPlainTextEdit()
+        self.changelog_view.setReadOnly(True)
+        self.changelog_view.setFont(mono_font())
+        self.details.addTab(self.description, self.t("tab_description"))
+        self.details.addTab(self.packages_view, self.t("tab_packages"))
+        self.details.addTab(self.changelog_view, self.t("tab_changelog"))
+        self.details.currentChanged.connect(lambda _i: self.load_changelog())
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.tree)
-        splitter.addWidget(details)
+        splitter.addWidget(self.details)
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([300, 150])
-        body_layout.addWidget(splitter, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([330, 130])
+        layout.addWidget(splitter, 1)
+        outer.addWidget(body, 1)
 
-        actions = QHBoxLayout()
-        self.select_all = QCheckBox(self.t("select_all"))
+        status = self.statusBar()
+        status.setSizeGripEnabled(True)
+        self.select_all = QCheckBox()
+        self.select_all.setToolTip(self.t("select_all"))
         self.select_all.setChecked(True)
         self.select_all.stateChanged.connect(self.toggle_all)
         self.selection_label = QLabel(objectName="selectionLabel")
-        self.history_button = QPushButton(self.t("history"), objectName="secondaryButton")
-        self.check_button = QPushButton(self.t("check_updates"), objectName="secondaryButton")
-        self.install_button = QPushButton(self.t("install"), objectName="primaryButton")
-        self.history_button.clicked.connect(self.show_history)
-        self.check_button.clicked.connect(self.check_updates)
-        self.install_button.clicked.connect(self.install_updates)
-        actions.addWidget(self.select_all)
-        actions.addWidget(self.selection_label, 1)
-        actions.addWidget(self.history_button)
-        actions.addWidget(self.check_button)
-        actions.addWidget(self.install_button)
-        body_layout.addLayout(actions)
-        outer.addWidget(body, 1)
+        self.progress_detail = QLabel(objectName="progressDetail")
+        self.progress_detail.hide()
+        self.global_progress = QProgressBar(objectName="globalProgress")
+        self.global_progress.setRange(0, 0)
+        self.global_progress.setTextVisible(False)
+        self.global_progress.setFixedSize(110, 6)
+        self.global_progress.hide()
+        self.last_checked = QLabel(objectName="muted")
+        self.schedule_label = self.last_checked
+        status.addWidget(self.select_all)
+        status.addWidget(self.selection_label)
+        status.addWidget(self.progress_detail, 1)
+        status.addPermanentWidget(self.global_progress)
+        status.addPermanentWidget(self.last_checked)
 
     def apply_style(self) -> None:
         self.setStyleSheet(
             """
-            QMainWindow, QWidget#body { background: #F4F6F5; color: #1F2933; }
-            QMenuBar#mainMenu { background: #FFFFFF; border-bottom: 1px solid #DDE3E0; padding: 2px 6px; }
-            QMenuBar#mainMenu::item { padding: 5px 11px; border-radius: 4px; color: #1F2933; }
-            QMenuBar#mainMenu::item:selected { background: #E3F1EA; color: #0F5C3F; }
-            QMenu { background: #FFFFFF; border: 1px solid #CBD5D0; padding: 4px; }
-            QMenu::item { padding: 6px 22px; border-radius: 3px; }
-            QMenu::item:selected { background: #E3F1EA; color: #0F5C3F; }
-            QFrame#header { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #0F6B4A, stop:1 #1F8F63); border: 0; }
-            QLabel#appTitle { color: #FFFFFF; font-size: 17px; font-weight: 700; }
-            QLabel#subtitle { color: #D7F0E4; font-size: 11px; }
-            QLabel#versionChip { color: #0F5C3F; background: #E8F7EF; border-radius: 9px;
-                padding: 2px 10px; font-weight: 600; }
-            QFrame#statusCard { background: #FFFFFF; border: 1px solid #DDE3E0; border-radius: 8px; }
-            QLabel#statusTitle { color: #111827; font-size: 15px; font-weight: 700; }
-            QLabel#muted { color: #6B7280; font-size: 11px; }
-            QLabel#progressDetail { color: #374151; font-size: 11px; }
+            QWidget#body, QDialog { background: #F6F7F6; }
+            QFrame#toolbar { background: #FFFFFF; border-bottom: 1px solid #E1E4E2; }
+            QLabel#statusTitle { font-weight: 600; color: #1F2933; padding-left: 4px; }
+            QLabel#muted { color: #6B7280; }
             QLabel#selectionLabel { color: #374151; }
-            QLabel#chip_critical, QLabel#chip_medium, QLabel#chip_normal, QLabel#chip_flatpak {
-                border-radius: 11px; padding: 4px 10px; font-weight: 600; font-size: 11px; }
-            QLabel#chip_critical { background: #FEE4E2; color: #912018; }
-            QLabel#chip_medium { background: #FEF0C7; color: #7A4D00; }
-            QLabel#chip_normal { background: #D1FADF; color: #05603A; }
-            QLabel#chip_flatpak { background: #D1E9FF; color: #194185; }
-            QFrame#banner_pause { background: #FFFAEB; border: 1px solid #FEC84B; border-radius: 6px; }
-            QFrame#banner_repo { background: #FEF3F2; border: 1px solid #FDA29B; border-radius: 6px; }
-            QFrame#banner_kernel { background: #EFF8FF; border: 1px solid #84CAFF; border-radius: 6px; }
-            QFrame#banner_os { background: #F4F3FF; border: 1px solid #9B8AFB; border-radius: 6px; }
-            QFrame#banner_restart { background: #FFF6ED; border: 1px solid #F7B27A; border-radius: 6px; }
-            QPushButton#bannerButton { background: #FFFFFF; border: 1px solid #B8C2BE; border-radius: 4px;
-                padding: 0 10px; min-height: 26px; }
-            QPushButton#bannerButton:hover { border-color: #6B7280; }
-            QTreeWidget#updatesTree, QTreeWidget#kernelTree, QTreeWidget#keyTree { background: #FFFFFF;
-                border: 1px solid #D0D7D3; border-radius: 6px; outline: 0; font-size: 11px; }
-            QTreeWidget#updatesTree::item, QTreeWidget#kernelTree::item { min-height: 30px; }
-            QTreeWidget#keyTree::item { min-height: 26px; }
-            QTreeWidget::item:selected { background: #D3EBDF; color: #111827; }
-            QHeaderView::section { background: #F1F4F2; color: #374151; border: 0;
-                border-right: 1px solid #E1E6E3; border-bottom: 1px solid #D0D7D3;
-                padding: 6px 8px; font-weight: 600; }
-            QFrame#detailsBox { background: #FFFFFF; border: 1px solid #D0D7D3; border-radius: 6px; }
-            QLabel#detailsTitle { color: #111827; font-weight: 700; border: 0; }
-            QLabel#dialogTitle { color: #0F5C3F; font-size: 16px; font-weight: 700; }
-            QLabel#runningKernel { color: #0F7B4F; font-weight: 700; font-size: 13px; }
+            QLabel#progressDetail { color: #374151; }
+            QLabel#bannerText { color: #1F2933; }
+            QLabel#dialogTitle { color: #14532D; font-weight: 700; }
+            QLabel#runningKernel { color: #0F7B4F; font-weight: 600; }
             QLabel#pauseStatus { font-weight: 600; color: #05603A; }
             QLabel#pauseStatus[paused="true"] { color: #93370D; }
-            QGroupBox { font-weight: 700; border: 1px solid #D0D7D3; border-radius: 6px;
-                margin-top: 10px; padding: 10px 8px 8px 8px; background: #FFFFFF; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1F2933; }
-            QPushButton { min-height: 30px; padding: 0 13px; border-radius: 5px; }
+            QFrame#banner_self, QFrame#banner_os { background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 4px; }
+            QFrame#banner_restart { background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 4px; }
+            QFrame#banner_repo { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; }
+            QFrame#banner_pause { background: #FEFCE8; border: 1px solid #FDE68A; border-radius: 4px; }
+            QFrame#banner_kernel { background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 4px; }
+            QPushButton { min-height: 24px; padding: 0 10px; border-radius: 4px; }
             QPushButton#secondaryButton, QPushButton#chipButton { background: #FFFFFF; color: #1F2933;
-                border: 1px solid #B8C2BE; }
-            QPushButton#secondaryButton:hover, QPushButton#chipButton:hover { border-color: #6B7280;
-                background: #F9FAFB; }
-            QPushButton#secondaryButton:disabled { color: #9CA3AF; border-color: #D1D5DB; }
-            QPushButton#chipButton { min-height: 26px; padding: 0; }
+                border: 1px solid #C8CECB; }
+            QPushButton#secondaryButton:hover, QPushButton#chipButton:hover { background: #F3F4F6; }
+            QPushButton#secondaryButton:disabled { color: #9CA3AF; border-color: #E5E7EB; }
             QPushButton#primaryButton { background: #157A55; color: #FFFFFF; border: 1px solid #0F5C3F;
                 font-weight: 600; }
             QPushButton#primaryButton:hover { background: #10684A; }
-            QPushButton#primaryButton:pressed { background: #0D573D; }
             QPushButton#primaryButton:disabled { background: #B8CEC5; border-color: #A9BFB6; }
-            QPushButton#dangerButton { background: #FFFFFF; color: #B42318; border: 1px solid #F04438;
-                font-weight: 600; }
-            QPushButton#dangerButton:hover { background: #FEF3F2; }
+            QPushButton#dangerButton { background: #FFFFFF; color: #B42318; border: 1px solid #F04438; }
             QPushButton#dangerButton:disabled { color: #F5A9A2; border-color: #F8C7C2; }
-            QWidget#rowProgressContainer { background: transparent; }
-            QProgressBar#rowProgress { border: 1px solid #9DB5AA; border-radius: 4px;
-                background: #E7EEEA; color: #173E2F; text-align: center;
-                font-size: 9px; font-weight: 600; min-height: 14px; max-height: 14px; }
-            QProgressBar#rowProgress::chunk { background: #199B61; border-radius: 2px; }
-            QProgressBar#globalProgress { border: 0; background: #DDE8E2; border-radius: 2px; }
-            QProgressBar#globalProgress::chunk { background: #157A55; border-radius: 2px; }
-            QProgressBar#taskProgress { border: 1px solid #9DB5AA; border-radius: 5px; background: #E7EEEA;
-                text-align: center; min-height: 16px; }
-            QProgressBar#taskProgress::chunk { background: #199B61; border-radius: 4px; }
-            QDialog { background: #F4F6F5; }
-            QLineEdit, QComboBox { min-height: 28px; padding: 0 7px;
-                border: 1px solid #C3CCC7; border-radius: 4px; background: #FFFFFF; }
-            QLineEdit:focus, QComboBox:focus { border-color: #157A55; }
-            QSpinBox, QTimeEdit { min-height: 28px; min-width: 96px; }
-            QLabel#bannerText { color: #1F2933; font-weight: 600; }
-            QPlainTextEdit { border: 1px solid #C3CCC7; border-radius: 4px; background: #FFFFFF; }
-            QTabWidget::pane { border: 1px solid #D0D7D3; border-radius: 6px; background: #FFFFFF; top: -1px; }
-            QTabBar::tab { background: #E9EEEB; border: 1px solid #D0D7D3; padding: 6px 14px;
-                border-top-left-radius: 5px; border-top-right-radius: 5px; margin-right: 2px; }
-            QTabBar::tab:selected { background: #FFFFFF; border-bottom-color: #FFFFFF; font-weight: 600; }
+            QPushButton#linkButton { background: transparent; border: 0; color: #1D4ED8; font-weight: 600;
+                min-height: 20px; padding: 0 6px; }
+            QPushButton#linkButton:hover { text-decoration: underline; }
+            QPushButton#chipButton { min-height: 22px; padding: 0; }
+            QToolButton#menuButton { border: 1px solid #C8CECB; border-radius: 4px; background: #FFFFFF;
+                min-width: 26px; min-height: 24px; padding: 0 4px; }
+            QToolButton#menuButton:hover { background: #F3F4F6; }
+            QToolButton#menuButton::menu-indicator { image: none; width: 0; }
+            QMenu { background: #FFFFFF; border: 1px solid #D1D5DB; padding: 4px; }
+            QMenu::item { padding: 5px 22px 5px 14px; border-radius: 3px; }
+            QMenu::item:selected { background: #E8F3EE; color: #0F5C3F; }
+            QMenu::item:disabled { color: #9CA3AF; }
+            QMenu::separator { height: 1px; background: #E5E7EB; margin: 4px 6px; }
+            QTreeWidget { background: #FFFFFF; alternate-background-color: #FAFBFA; border: 1px solid #E1E4E2;
+                outline: 0; }
+            QTreeWidget::item { min-height: 24px; }
+            QTreeWidget::item:selected { background: #DCEFE6; color: #111827; }
+            QHeaderView::section { background: #FFFFFF; color: #6B7280; border: 0;
+                border-bottom: 1px solid #E1E4E2; padding: 4px 6px; }
+            QTabWidget#details::pane { border: 1px solid #E1E4E2; background: #FFFFFF; top: -1px; }
+            QTabBar::tab { background: transparent; border: 0; padding: 4px 10px; color: #6B7280; }
+            QTabBar::tab:selected { color: #14532D; border-bottom: 2px solid #157A55; }
+            QPlainTextEdit { border: 0; background: #FFFFFF; }
+            QStatusBar { background: #FFFFFF; border-top: 1px solid #E1E4E2; }
+            QStatusBar::item { border: 0; }
+            QGroupBox { font-weight: 600; border: 1px solid #E1E4E2; border-radius: 4px; margin-top: 8px;
+                padding: 8px 6px 6px 6px; background: #FFFFFF; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }
+            QLineEdit, QComboBox { min-height: 24px; padding: 0 6px; border: 1px solid #C8CECB;
+                border-radius: 4px; background: #FFFFFF; }
+            QSpinBox, QTimeEdit { min-height: 24px; min-width: 90px; }
+            QProgressBar#rowProgress { border: 1px solid #A7C4B5; border-radius: 3px; background: #EEF4F0;
+                text-align: center; max-height: 12px; }
+            QProgressBar#rowProgress::chunk { background: #199B61; }
+            QProgressBar#globalProgress { border: 0; background: #E5EDE8; border-radius: 3px; }
+            QProgressBar#globalProgress::chunk { background: #157A55; border-radius: 3px; }
+            QProgressBar#taskProgress { border: 1px solid #A7C4B5; border-radius: 3px; background: #EEF4F0;
+                text-align: center; max-height: 14px; }
+            QProgressBar#taskProgress::chunk { background: #199B61; }
+            QTabWidget::pane { border: 1px solid #E1E4E2; background: #FFFFFF; }
             """
         )
 
@@ -2528,6 +2897,7 @@ class UpdateWindow(QMainWindow):
                                          codename=upgrade["target_codename"]))
         self.os_banner.setVisible(bool(upgrade))
         self.upgrade_action.setVisible(bool(upgrade))
+
         until = paused_until()
         self.pause_label.setText(self.t("banner_paused", date=format_date(until)))
         self.pause_banner.setVisible(bool(until))
@@ -2547,7 +2917,7 @@ class UpdateWindow(QMainWindow):
             text = self.t("schedule_week")
         else:
             text = self.t("schedule_interval", hours=schedule["hours"])
-        self.schedule_label.setText(self.t("next_check", schedule=text))
+        self.last_checked.setToolTip(self.t("next_check", schedule=text))
         self.probe_kernels()
 
     def probe_kernels(self) -> None:
@@ -2596,64 +2966,40 @@ class UpdateWindow(QMainWindow):
         user_records = scan_user_flatpaks()
         known = {(r["source"], r["name"]) for r in system_records}
         self.records = system_records + [r for r in user_records if (r["source"], r["name"]) not in known]
+        self.groups = group_updates(self.records)
         state = self.read_state()
         self.tree.blockSignals(True)
         self.tree.clear()
         self.package_items.clear()
         self.progress_widgets.clear()
-        groups = {key: [r for r in self.records if r["category"] == key] for key in CATEGORY_ORDER}
-        first_package_item = None
-        for category in CATEGORY_ORDER:
-            records = groups[category]
-            chip = self.chips[category]
-            chip.setText(f"{self.t('chip_' + category)}  {len(records)}")
-            chip.setVisible(bool(records))
-            if not records:
-                continue
-            color, pale, dark = CATEGORY_COLORS[category]
-            group = QTreeWidgetItem([f"●  {self.t(category)}  ({len(records)})"])
-            group.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            group.setForeground(0, QBrush(QColor(dark)))
-            for column in range(5):
-                group.setBackground(column, QBrush(QColor(pale)))
-            font = QFont()
-            font.setBold(True)
-            font.setPointSize(10)
-            group.setFont(0, font)
-            self.tree.addTopLevelItem(group)
-            # setFirstColumnSpanned() belongs to QTreeWidgetItem in Qt 6.
-            group.setFirstColumnSpanned(True)
-            for record in records:
-                item = QTreeWidgetItem(group, [record["name"], record["installed"],
-                                                record["candidate"], format_bytes(record["size"]), ""])
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
-                item.setCheckState(0, Qt.CheckState.Checked)
-                item.setData(0, Qt.ItemDataRole.UserRole, record)
-                package_font = item.font(0)
-                package_font.setBold(True)
-                item.setFont(0, package_font)
-                item.setForeground(0, QBrush(QColor("#111827")))
-                for column in (1, 2, 3):
-                    item.setForeground(column, QBrush(QColor("#4B5563")))
-                item.setToolTip(0, record["description"])
-                progress_container = QWidget(objectName="rowProgressContainer")
-                progress_layout = QHBoxLayout(progress_container)
-                progress_layout.setContentsMargins(9, 3, 9, 3)
-                progress_layout.setSpacing(0)
-                row_progress = QProgressBar(objectName="rowProgress")
-                row_progress.setTextVisible(True)
-                row_progress.setRange(0, 100)
-                row_progress.setFormat("%p%")
-                row_progress.setMinimumWidth(126)
-                row_progress.setValue(1)
-                row_progress.hide()
-                progress_layout.addWidget(row_progress, 0, Qt.AlignmentFlag.AlignCenter)
-                self.tree.setItemWidget(item, 4, progress_container)
+        for group in self.groups:
+            category = group["category"]
+            color, _pale, _dark = CATEGORY_COLORS.get(category, CATEGORY_COLORS["normal"])
+            title = group["name"]
+            if len(group["packages"]) > 1:
+                title += f"  ({len(group['packages'])})"
+            summary = group["description"].split(" — ")[-1]
+            item = QTreeWidgetItem([self.t("type_" + category), f"{title}   {summary}",
+                                    group["candidate"], format_bytes(group["size"]), ""])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
+            item.setCheckState(0, Qt.CheckState.Checked)
+            item.setData(0, Qt.ItemDataRole.UserRole, group)
+            item.setForeground(0, QBrush(QColor(color)))
+            badge = item.font(0)
+            badge.setBold(True)
+            item.setFont(0, badge)
+            item.setToolTip(1, f"{group['name']}\n{group['description']}")
+            item.setToolTip(2, f"{group['installed']} → {group['candidate']}")
+            self.tree.addTopLevelItem(item)
+            row_progress = QProgressBar(objectName="rowProgress")
+            row_progress.setRange(0, 100)
+            row_progress.setFormat("%p%")
+            row_progress.setValue(1)
+            row_progress.hide()
+            self.tree.setItemWidget(item, 4, row_progress)
+            for record in group["packages"]:
                 self.progress_widgets[(record["source"], record["name"])] = row_progress
-                self.package_items.append(item)
-                if first_package_item is None:
-                    first_package_item = item
-            group.setExpanded(True)
+            self.package_items.append(item)
         self.tree.blockSignals(False)
 
         try:
@@ -2664,26 +3010,32 @@ class UpdateWindow(QMainWindow):
         except (ValueError, OSError, OverflowError):
             checked_text = "—"
         self.last_checked.setText(self.t("last_check", time=checked_text))
+        counts = {c: sum(1 for g in self.groups if g["category"] == c) for c in CATEGORY_RANK}
         if restart_is_required(state):
             self.status_title.setText(self.t("restart_pending"))
-        elif state.get("release_upgrade") == "1":
-            self.status_title.setText(self.t("release_available"))
-        elif (state.get("state") == "ok" or user_records) and self.records:
-            self.status_title.setText(self.t("available"))
+        elif self.groups:
+            parts = [f"{counts[c]} {self.t('type_' + c).lower()}" for c in CATEGORY_RANK if counts[c]]
+            self.status_title.setText(self.t("st_updates", count=len(self.groups), parts=", ".join(parts)))
         elif state.get("state") == "ok":
             self.status_title.setText(self.t("current"))
         else:
             self.status_title.setText(self.t("empty"))
         if state.get("checked_at"):
-            self.check_button.setText(self.t("check_again"))
+            self.check_button.setText(self.t("tb_refresh"))
+        self_update = next((g for g in self.groups if g["self_update"]), None)
+        self.self_label.setText(self.t("sb_self_update"))
+        self.self_banner.setVisible(self_update is not None)
         self.select_all.blockSignals(True)
         self.select_all.setChecked(bool(self.package_items))
         self.select_all.blockSignals(False)
         self.select_all.setEnabled(bool(self.package_items) and not self.is_busy())
-        if first_package_item is not None:
-            self.tree.setCurrentItem(first_package_item)
+        if self.package_items:
+            self.tree.setCurrentItem(self.package_items[0])
         else:
-            self.description.setText(self.t("choose"))
+            self.description.setText(self.t("choose") if self.records or state.get("state") != "ok"
+                                     else self.t("current"))
+            self.packages_view.clear()
+            self.changelog_view.clear()
         self.update_selection_summary()
         if update_panel:
             self.sync_panel_status()
@@ -2693,59 +3045,152 @@ class UpdateWindow(QMainWindow):
         # returns from closeEvent() only when updates are still available.
         set_panel_status("hidden")
 
+    def selected_groups(self) -> list[dict]:
+        return [item.data(0, Qt.ItemDataRole.UserRole) for item in self.package_items
+                if item.checkState(0) == Qt.CheckState.Checked]
+
     def selected_records(self) -> list[dict]:
-        selected = []
-        for item in self.package_items:
-            if item.checkState(0) == Qt.CheckState.Checked:
-                record = item.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(record, dict):
-                    selected.append(record)
-        return selected
+        return [record for group in self.selected_groups() for record in group["packages"]]
 
     def selection_changed(self, _item=None, _column=0) -> None:
         self.update_selection_summary()
 
     def update_selection_summary(self) -> None:
-        selected = self.selected_records()
-        self.selection_label.setText(self.t("selected", count=len(selected),
-                                            size=format_bytes(sum(r["size"] for r in selected))))
-        can_install = bool(selected) and not self.is_busy()
-        self.install_button.setEnabled(can_install)
-        self.install_action.setEnabled(can_install)
+        groups = self.selected_groups()
+        size = sum(g["size"] for g in groups)
+        self.selection_label.setText(self.t("selected", count=len(groups), size=format_bytes(size)))
+        self.install_button.setEnabled(bool(groups) and not self.is_busy())
         self.select_all.blockSignals(True)
-        self.select_all.setChecked(bool(self.package_items) and len(selected) == len(self.package_items))
+        self.select_all.setChecked(bool(self.package_items) and len(groups) == len(self.package_items))
         self.select_all.blockSignals(False)
 
-    def toggle_all(self, state: int) -> None:
-        checked = Qt.CheckState.Checked if state == Qt.CheckState.Checked.value else Qt.CheckState.Unchecked
+    def set_all_checked(self, checked: bool) -> None:
         self.tree.blockSignals(True)
         for item in self.package_items:
-            item.setCheckState(0, checked)
+            item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
         self.update_selection_summary()
+
+    def toggle_all(self, state: int) -> None:
+        self.set_all_checked(state == Qt.CheckState.Checked.value)
+
+    def select_security_only(self) -> None:
+        self.tree.blockSignals(True)
+        for item in self.package_items:
+            group = item.data(0, Qt.ItemDataRole.UserRole)
+            wanted = group["category"] in {"critical", "kernel"}
+            item.setCheckState(0, Qt.CheckState.Checked if wanted else Qt.CheckState.Unchecked)
+        self.tree.blockSignals(False)
+        self.update_selection_summary()
+
+    def install_self_update(self) -> None:
+        """Like mintupdate: update the update manager itself before anything else."""
+        self.tree.blockSignals(True)
+        for item in self.package_items:
+            group = item.data(0, Qt.ItemDataRole.UserRole)
+            item.setCheckState(0, Qt.CheckState.Checked if group["self_update"] else Qt.CheckState.Unchecked)
+        self.tree.blockSignals(False)
+        self.update_selection_summary()
+        self.install_updates()
+
+    def show_context_menu(self, position) -> None:
+        item = self.tree.itemAt(position)
+        if item is None or self.is_busy():
+            return
+        group = item.data(0, Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        if group["source"] == "apt":
+            ignore_version = menu.addAction(self.t("cm_ignore_version", version=group["candidate"]))
+            ignore_version.triggered.connect(lambda: self.ignore_group(group, versioned=True))
+            ignore_all = menu.addAction(self.t("cm_ignore_all"))
+            ignore_all.triggered.connect(lambda: self.ignore_group(group, versioned=False))
+            menu.addSeparator()
+        same = menu.addAction(self.t("cm_select_type", type=self.t("type_" + group["category"]).lower()))
+
+        def select_same() -> None:
+            self.tree.blockSignals(True)
+            for other in self.package_items:
+                data = other.data(0, Qt.ItemDataRole.UserRole)
+                other.setCheckState(0, Qt.CheckState.Checked if data["category"] == group["category"]
+                                    else Qt.CheckState.Unchecked)
+            self.tree.blockSignals(False)
+            self.update_selection_summary()
+
+        same.triggered.connect(select_same)
+        menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def ignore_group(self, group: dict, versioned: bool) -> None:
+        name = group["key"][1]
+        pattern = f"{name}={group['candidate']}" if versioned else name
+        self.start_queue([self.root_queue_item("ignore", ["add", pattern])], "settings")
 
     def show_description(self, current, _previous) -> None:
         if current is None:
             return
-        record = current.data(0, Qt.ItemDataRole.UserRole)
-        if not isinstance(record, dict):
+        group = current.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(group, dict):
             return
-        category = record["category"]
-        color = CATEGORY_COLORS[category][0]
-        source = self.t(f"source_{record['source']}")
-        package_name = html.escape(record["name"])
-        purpose = html.escape(record["description"])
-        installed = html.escape(record["installed"])
-        candidate = html.escape(record["candidate"])
+        category = group["category"]
+        color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["normal"])[0]
+        source = self.t(f"source_{group['source']}")
         self.description.setText(
-            f"<b style='font-size:13px'>{package_name}</b> &nbsp; "
-            f"<span style='color:{color};font-weight:700'>● {self.t(category)}</span> &nbsp; · &nbsp; {source}<br>"
-            f"<b>{self.t('purpose')}:</b> {purpose}<br>"
-            f"<b>{self.t('fixes')}:</b> {self.t('fix_' + category)}<br>"
-            f"<b>{self.t('danger')}:</b> <span style='color:{color}'>{self.t('risk_' + category)}</span><br>"
-            f"<b>{self.t('recommendation')}:</b> {self.t('recommend_' + category)}<br>"
-            f"<span style='color:#64748B'>{installed} → {candidate}</span>"
+            f"<b>{html.escape(group['name'])}</b> &nbsp;"
+            f"<span style='color:{color};font-weight:600'>{self.t('type_' + category)}</span>"
+            f" &nbsp;·&nbsp; {source} &nbsp;·&nbsp; "
+            f"<span style='color:#6B7280'>{html.escape(group['installed'])} → "
+            f"{html.escape(group['candidate'])}</span><br>"
+            f"{html.escape(group['description'])}<br>"
+            f"<span style='color:#4B5563'>{self.t('fix_' + category)} "
+            f"<span style='color:{color}'>{self.t('risk_' + category)}</span> "
+            f"{self.t('recommend_' + category)}</span>"
         )
+        self.packages_view.setPlainText("\n".join(
+            f"{p['name']:<40} {p['installed']} → {p['candidate']}  ({format_bytes(p['size'])})"
+            for p in group["packages"]))
+        self.changelog_view.clear()
+        self.load_changelog()
+
+    def load_changelog(self) -> None:
+        """Fetch the changelog only when its tab is visible (like mintupdate)."""
+        if self.details.currentWidget() is not self.changelog_view:
+            return
+        item = self.tree.currentItem()
+        group = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(group, dict):
+            return
+        if group["source"] != "apt":
+            self.changelog_view.setPlainText(self.t("cg_flatpak"))
+            return
+        package = group["main"]["name"]
+        if package in self.changelog_cache:
+            self.changelog_view.setPlainText(self.changelog_cache[package])
+            return
+        if self.changelog_process is not None:
+            return
+        self.changelog_view.setPlainText(self.t("cg_loading"))
+        process = QProcess(self)
+        self.changelog_process = process
+
+        def done(exit_code: int, _status=None) -> None:
+            if self.changelog_process is not process:
+                return
+            self.changelog_process = None
+            text = bytes(process.readAllStandardOutput()).decode("utf-8", "replace").strip()
+            if exit_code != 0 or not text:
+                text = bytes(process.readAllStandardError()).decode("utf-8", "replace").strip() \
+                    or self.t("cg_none")
+            self.changelog_cache[package] = text
+            process.deleteLater()
+            current = self.tree.currentItem()
+            if current is not None and current.data(0, Qt.ItemDataRole.UserRole) is group:
+                self.changelog_view.setPlainText(text)
+            elif self.details.currentWidget() is self.changelog_view:
+                self.load_changelog()
+
+        process.finished.connect(done)
+        process.errorOccurred.connect(lambda _e: done(1))
+        command = tool_command("changelog", package, group["main"]["installed"])
+        process.start(command[0], command[1:])
 
     def showEvent(self, event) -> None:
         set_panel_status("hidden")
@@ -2757,7 +3202,7 @@ class UpdateWindow(QMainWindow):
             event.ignore()
             return
         if self.records and not paused_until():
-            set_panel_status("available", count=len(self.records))
+            set_panel_status("available", count=len(self.groups))
         else:
             set_panel_status("hidden")
         super().closeEvent(event)
@@ -2766,17 +3211,16 @@ class UpdateWindow(QMainWindow):
         return self.process is not None or self.external_busy
 
     def set_busy(self, busy: bool, text: str = "") -> None:
-        for widget in (self.history_button, self.check_button, self.select_all):
+        for widget in (self.check_button, self.select_all):
             widget.setEnabled(not busy)
         for action in self.busy_actions:
             action.setEnabled(not busy)
-        for banner in (self.pause_banner, self.repo_banner, self.kernel_banner, self.restart_banner,
-                       self.os_banner):
+        for banner in self.banners:
             banner.setEnabled(not busy)
-        can_install = not busy and bool(self.selected_records())
-        self.install_button.setEnabled(can_install)
-        self.install_action.setEnabled(can_install)
+        self.install_button.setEnabled(not busy and bool(self.selected_groups()))
+        self.tree.setColumnHidden(4, not busy)
         self.progress_detail.setVisible(busy)
+        self.selection_label.setVisible(not busy)
         self.global_progress.setVisible(busy)
         if busy:
             self.status_title.setText(text)
@@ -3054,7 +3498,7 @@ class UpdateWindow(QMainWindow):
     def check_updates(self) -> None:
         if self.is_busy():
             return
-        self.check_button.setText(self.t("check_again"))
+        self.check_button.setText(self.t("tb_refresh"))
         commands = []
         if shutil.which("flatpak"):
             commands.append(self.user_flatpak_refresh_item())
@@ -3134,6 +3578,7 @@ class UpdateWindow(QMainWindow):
 
     def open_page(self, page: str) -> None:
         handlers = {"kernel": self.show_kernels, "key-fix": self.show_key_fix,
+                    "cleaner": self.show_cleaner,
                     "add-repo": self.show_add_repo, "upgrade-os": self.show_upgrade_os,
                     "add-key": self.show_add_key, "settings": self.show_settings}
         if page in handlers and QApplication.activeModalWidget() is None:
@@ -3144,6 +3589,9 @@ class UpdateWindow(QMainWindow):
 
     def show_key_fix(self) -> None:
         self.run_dialog(KeyFixDialog(self))
+
+    def show_cleaner(self) -> None:
+        self.run_dialog(CleanerDialog(self))
 
     def show_add_repo(self) -> None:
         self.run_dialog(AddRepoDialog(self))
@@ -3258,7 +3706,14 @@ class UpdateWindow(QMainWindow):
         dialog.exec()
 
 
+def log_unexpected(exc_type, exc, trace) -> None:
+    """Print unexpected errors instead of letting PyQt6 abort the program."""
+    import traceback
+    traceback.print_exception(exc_type, exc, trace)
+
+
 def main() -> int:
+    sys.excepthook = log_unexpected
     args = sys.argv[1:]
     page = ""
     if "--open" in args:
@@ -3306,6 +3761,7 @@ def main() -> int:
 
     window = UpdateWindow()
     window.show()
+    app.aboutToQuit.connect(lambda: [stop_background(p) for p in window.findChildren(QProcess)])
 
     if server is not None:
         def present_primary_window() -> None:
@@ -3344,8 +3800,24 @@ def main() -> int:
     if screenshot:
         def save_preview() -> None:
             target = QApplication.activeModalWidget() or window
-            target.grab().save(screenshot)
+            image = target.grab()
+            menu = window.menu_button.menu()
+            if menu.isVisible():
+                # Compose the open main menu onto the window image.
+                from PyQt6.QtGui import QPainter
+                painter = QPainter(image)
+                painter.drawPixmap(window.mapFromGlobal(menu.pos()), menu.grab())
+                painter.end()
+            image.save(screenshot)
             app.exit(0)
+
+        if os.environ.get("EUS_SCREENSHOT_MENU") == "1":
+            def open_menu() -> None:
+                button = window.menu_button
+                menu = button.menu()
+                menu.popup(button.mapToGlobal(button.rect().bottomRight()) - QPoint(menu.sizeHint().width(), 0))
+
+            QTimer.singleShot(600, open_menu)
 
         QTimer.singleShot(1200, save_preview)
     if page:

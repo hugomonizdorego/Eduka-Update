@@ -133,5 +133,27 @@ if shutil.which("gpg"):
     assert broken["problems"], broken
     shutil.rmtree(home, ignore_errors=True)
 
+# System Cleaner: per-user caches are found and emptied, never deleted outside $HOME.
+home = ROOT / "home"
+thumbs = home / ".cache/thumbnails/normal"
+thumbs.mkdir(parents=True)
+(thumbs / "a.png").write_bytes(b"x" * 4096)
+firefox = home / ".cache/mozilla/firefox/abc.default-esr/cache2"
+firefox.mkdir(parents=True)
+(firefox / "entry").write_bytes(b"y" * 8192)
+old_home = os.environ.get("HOME")
+os.environ["HOME"] = str(home)
+found = {item["id"]: item for item in tool.scan_user()}
+assert found["thumbnails"]["size"] == 4096 and found["firefox"]["size"] == 8192, found
+assert "trash" not in found
+result = tool.clean_user(["thumbnails", "firefox"])
+assert result["freed"] == 12288, result
+assert (home / ".cache/thumbnails").is_dir() and not any((home / ".cache/thumbnails").iterdir())
+assert firefox.is_dir() and not any(firefox.iterdir())
+if old_home is not None:
+    os.environ["HOME"] = old_home
+assert tool.ROTATED_LOG_RE.match("syslog.2.gz") and tool.ROTATED_LOG_RE.match("kern.log.1")
+assert not tool.ROTATED_LOG_RE.match("syslog")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print(json.dumps({"tool_tests": "passed"}))
