@@ -56,7 +56,7 @@ problems = tool.apt_problems(
     "W: http://x/dists/y/InRelease: Key is stored in legacy trusted.gpg keyring\n")
 assert problems["missing_keys"] == [{"keyid": "0123456789ABCDEF",
                                      "url": "https://repo.example.org/apt"}], problems
-assert problems["unsigned"] and problems["legacy_warning"]
+assert not problems["unsigned"] and problems["legacy_warning"]  # the missing key explains it
 assert problems["configured_multiple_times"]
 blocked = tool.apt_problems(
     "Err:1 http://ppa.example.org/ubuntu noble InRelease\n  403  Forbidden [IP: 1.2.3.4 80]\n"
@@ -64,6 +64,15 @@ blocked = tool.apt_problems(
     "E: The repository 'http://ppa.example.org/ubuntu noble InRelease' is not signed.\n")
 assert not blocked["unsigned"], blocked
 assert blocked["unreachable"][0]["url"] == "http://ppa.example.org/ubuntu", blocked
+signature = tool.apt_problems(
+    "Err:1 http://127.0.0.1:8765 stable InRelease\n  The following signatures couldn't be verified "
+    "because the public key is not available: NO_PUBKEY EDFA432B3307B9AD\n"
+    "W: GPG error: http://127.0.0.1:8765 stable InRelease: The following signatures couldn't be verified "
+    "because the public key is not available: NO_PUBKEY EDFA432B3307B9AD\n"
+    "E: The repository 'http://127.0.0.1:8765 stable InRelease' is not signed.\n")
+assert not signature["unreachable"], signature
+assert not signature["unsigned"], signature
+assert signature["missing_keys"] == [{"keyid": "EDFA432B3307B9AD", "url": "http://127.0.0.1:8765"}], signature
 
 assert tool.kernel_release("linux-image-6.12.38+deb13-amd64") == "6.12.38+deb13-amd64"
 assert tool.kernel_release("linux-image-6.8.0-45-generic") == "6.8.0-45-generic"

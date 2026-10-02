@@ -1,5 +1,5 @@
 #!/bin/bash
-# Privileged helper for Eduka-Update-System 0.13. Do not launch directly.
+# Privileged helper for Eduka-Update-System 0.14. Do not launch directly.
 # It is the only program PolicyKit allows EUS to run as root.
 
 set -u
@@ -123,6 +123,14 @@ case "$LOCALE_CODE" in
         P_NETWORK="Some repositories could not be reached; the update list may be incomplete."
         ;;
 esac
+
+# Strings added in 0.14 (English).
+P_ADD_REPO='Adding the repository and looking for its signing key...'
+P_OS_CHECK='Checking for a new Edukasaun OS base release...'
+P_OS_PREPARE='Bringing the current release fully up to date...'
+P_OS_SWITCH='Switching repositories to the new release...'
+P_OS_UPGRADE='Upgrading the operating system (this can take a long time)...'
+P_OS_SPACE='Not enough free disk space for the OS upgrade (at least 5 GB is needed in / and /var).'
 
 progress() {
     printf '%s\n# %s\n' "$1" "$2"
@@ -447,22 +455,32 @@ apt_update_or_fail() {
     return 0
 }
 
+os_check() {
+    # Network check for a new Debian stable base; never fails the caller.
+    [[ -x "$PYTHON" && -r "$TOOL" ]] || return 0
+    timeout 90 "$PYTHON" -I "$TOOL" os-check >/dev/null 2>>"$LOG_FILE" || true
+}
+
 refresh_lists() {
     progress 8 "$P_REFRESH"
     log_header 'APT and Flatpak metadata refresh with category scan'
     apt_update_or_fail
     progress 68 "$P_CALCULATE"
     calculate_updates
+    progress 96 "$P_OS_CHECK"
+    os_check
     progress 100 "$P_DONE"
 }
 
 apt_upgrade_command() {
+    # UPGRADE_RANGE lets long multi-step operations map APT progress to a slice.
+    local -a range=(${UPGRADE_RANGE:-26 40 66 26})
     DEBIAN_FRONTEND=noninteractive apt-get \
         -o Acquire::Retries=3 \
         -o APT::Status-Fd=3 \
         -o Dpkg::Options::='--force-confdef' \
         -o Dpkg::Options::='--force-confold' \
-        "$@" 4>&1 >>"$LOG_FILE" 2>&1 3> >(apt_progress_stream 26 40 66 26 >&4)
+        "$@" 4>&1 >>"$LOG_FILE" 2>&1 3> >(apt_progress_stream "${range[@]}" >&4)
 }
 
 upgrade_all_apt() {
@@ -723,6 +741,88 @@ add_key() {
     progress 100 "$P_DONE"
 }
 
+add_repo() {
+    local -a args=()
+    local index flag value
+    ((${#EXTRA_ARGS[@]} <= 24)) || fail 'Invalid Add Repository arguments.'
+    for ((index = 0; index < ${#EXTRA_ARGS[@]}; index++)); do
+        flag="${EXTRA_ARGS[index]}"
+        case "$flag" in
+            --auto-key|--with-source) args+=("$flag"); continue ;;
+            --name|--line|--repo-uri|--suite|--components|--arch) ;;
+            *) fail "Invalid Add Repository option: $flag" ;;
+        esac
+        value="${EXTRA_ARGS[index + 1]:-}"
+        index=$((index + 1))
+        [[ -n "$value" && "$value" != -* && "$value" != *$'\n'* && ${#value} -le 1024 ]] || \
+            fail 'Invalid Add Repository value.'
+        args+=("$flag" "$value")
+    done
+    log_header 'Manual repository installation requested'
+    progress 2 "$P_ADD_REPO"
+    run_tool add-repo "${args[@]}"
+    progress 80 "$P_REFRESH"
+    refresh_after_repair
+    progress 100 "$P_DONE"
+}
+
+disk_free_kb() {
+    df -Pk "$1" 2>/dev/null | awk 'NR == 2 {print $4 + 0}'
+}
+
+os_upgrade() {
+    local target="${EXTRA_ARGS[0]:-}" backup errors plan
+    [[ "$target" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || fail 'Invalid release codename.'
+    # Keep going if the GUI that started the upgrade disappears.
+    trap '' HUP PIPE
+    log_header "OS upgrade to $target requested"
+    progress 1 "$P_OS_CHECK"
+    if (( $(disk_free_kb /) < 5242880 || $(disk_free_kb /var) < 5242880 )); then
+        fail "$P_OS_SPACE"
+    fi
+
+    # Validate the repository plan before changing anything on the system.
+    errors="$(mktemp)"
+    plan="$("$PYTHON" -I "$TOOL" os-plan --target "$target" --format text 2>"$errors")" || {
+        local message; message="$(tr '\n' ' ' <"$errors")$(grep -i blocked <<<"$plan")"; rm -f -- "$errors"
+        fail "${message:-The OS upgrade plan could not be prepared.}"
+    }
+    rm -f -- "$errors"
+    printf '%s\n' "$plan" >>"$LOG_FILE"
+    grep -q '^  switch ' <<<"$plan" || fail 'No repository offers the new release yet.'
+
+    progress 3 "$P_OS_PREPARE"
+    apt_update_or_fail
+    UPGRADE_RANGE='5 10 15 10' apt_upgrade_command full-upgrade -y || \
+        fail 'The current release could not be brought up to date. See /var/log/eus/eus.log.'
+
+    progress 26 "$P_OS_SWITCH"
+    errors="$(mktemp)"
+    backup="$("$PYTHON" -I "$TOOL" os-switch "$target" 2>"$errors")" || {
+        local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
+        fail "${message:-The repositories could not be switched.}"
+    }
+    rm -f -- "$errors"
+    log_header "Repositories switched to $target; backup in $backup"
+    if ! apt_update_command || "$PYTHON" -I "$TOOL" apt-problems --check --keys-only; then
+        # Never continue on half-working lists: restore the previous sources.
+        "$PYTHON" -I "$TOOL" os-restore "$backup" >>"$LOG_FILE" 2>&1 || true
+        apt_update_command || true
+        fail "The new release repositories could not be loaded; the previous repositories were restored. See /var/log/eus/eus.log."
+    fi
+
+    progress 35 "$P_OS_UPGRADE"
+    UPGRADE_RANGE='35 15 50 10' apt_upgrade_command upgrade --without-new-pkgs -y || \
+        fail 'The minimal upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run Upgrade OS again.'
+    UPGRADE_RANGE='60 15 75 15' apt_upgrade_command full-upgrade -y || \
+        fail 'The full upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run Upgrade OS again.'
+    progress 92 "$P_CALCULATE"
+    calculate_updates
+    os_check
+    log_header "OS upgrade to $target finished"
+    progress 100 "$P_DONE"
+}
+
 kernel_install() {
     local plan errors
     local -a tool_args=() packages=()
@@ -804,7 +904,8 @@ fi
 case "$ACTION" in
     refresh|auto-refresh|sources-refresh|upgrade-apt|install-apt|install-flatpak-system) ;;
     set-interval|set-schedule|pause|clear-history|reboot) ;;
-    fix-keys|fix-duplicates|add-key|kernel-install|kernel-remove) ;;
+    fix-keys|fix-duplicates|add-key|add-repo|kernel-install|kernel-remove) ;;
+    os-check|os-upgrade) ;;
     *) echo 'Invalid EUS privileged action.' >&2; exit 64 ;;
 esac
 
@@ -827,6 +928,9 @@ case "$ACTION" in
     fix-keys) fix_keys ;;
     fix-duplicates) fix_duplicates ;;
     add-key) add_key ;;
+    add-repo) add_repo ;;
+    os-check) progress 10 "$P_OS_CHECK"; os_check; progress 100 "$P_DONE" ;;
+    os-upgrade) os_upgrade ;;
     kernel-install) kernel_install ;;
     kernel-remove) kernel_remove ;;
     upgrade-apt) upgrade_all_apt ;;

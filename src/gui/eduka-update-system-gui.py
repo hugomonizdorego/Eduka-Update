@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Qt 6 interface for Eduka-Update-System 0.13."""
+"""Qt 6 interface for Eduka-Update-System 0.14."""
 
 from __future__ import annotations
 
@@ -38,8 +38,11 @@ PAUSE_FILE = Path(os.environ.get("EUS_PAUSE_FILE", "/etc/eus/pause"))
 SCHEDULE_FILE = Path(os.environ.get("EUS_SCHEDULE_FILE", "/etc/eus/schedule"))
 APT_UPDATE_LOG = Path(os.environ.get("EUS_APT_UPDATE_LOG", "/var/lib/eus/apt-update.log"))
 REPORT_FILE = Path(os.environ.get("EUS_REPORT_FILE", "/var/lib/eus/repair-report.json"))
+OS_UPGRADE_FILE = Path(os.environ.get("EUS_OS_UPGRADE_FILE", "/var/lib/eus/os-upgrade"))
+REPOSITORIES_FIXTURE = os.environ.get("EUS_REPOSITORIES_FIXTURE", "")
+OS_PLAN_FIXTURE = os.environ.get("EUS_OS_PLAN_FIXTURE", "")
 PANEL_STATUS = "/usr/local/bin/eus-panel-status"
-EUS_VERSION = "0.13"
+EUS_VERSION = "0.14"
 EUS_APP_ICON = "/usr/share/icons/hicolor/48x48/apps/eduka-update-system.png"
 EUS_ICON_DIR = "/usr/lib/EUS-ICONS"
 EUS_ICON_IDLE = f"{EUS_ICON_DIR}/eus-update-idle.png"
@@ -379,7 +382,7 @@ MESSAGES = {
     },
 }
 
-# Strings added in EUS 0.13. Missing translations fall back to English.
+# Strings added in EUS 0.13 and 0.14. Missing translations fall back to English.
 EXTRA_MESSAGES = {
     "en": {
         "menu_updates": "&Updates", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
@@ -417,9 +420,8 @@ EXTRA_MESSAGES = {
         "k_removed_ok": "The selected kernels were removed.", "k_no_old": "There is no old kernel to remove.",
         "k_select": "Select at least one removable kernel.",
         "kf_title": "Key Fix — Repository and GPG Key Repair",
-        "kf_intro": "Key Fix checks the APT signing keys and repository lists, downloads missing or expired keys, repairs damaged keyrings and removes duplicate repository entries. Backups are kept in /var/backups/eus.",
         "kf_tab_keys": "GPG keys", "kf_tab_repos": "Duplicate repositories",
-        "kf_col_item": "Item", "kf_col_problem": "Problem",
+        "kf_col_item": "Item",
         "kf_ok_keys": "No GPG key problem was found.", "kf_ok_repos": "No duplicate repository was found.",
         "kf_fix_keys": "Repair GPG Keys", "kf_fix_dups": "Fix Duplicates", "kf_rescan": "Scan Again",
         "kf_scanning": "Scanning repositories and keyrings…",
@@ -454,6 +456,40 @@ EXTRA_MESSAGES = {
         "st_pause_note": "While paused, EUS does not check automatically and shows no update notifications. You can still check and install manually.",
         "st_week": "Every week", "st_general": "Notifications",
         "log_title": "EUS Log",
+        "kf_col_problem": "Details",
+        "kf_intro": "Key Fix first works out where each repository's key belongs: package keyrings in /usr/share/keyrings are never edited (their package is reinstalled), repository keyrings in /etc/apt/keyrings are used through Signed-By, and /etc/apt/trusted.gpg.d is only for keys trusted by every repository. Missing or expired keys are then found on the internet and installed into exactly that place; duplicate repositories are disabled. Backups are kept in /var/backups/eus.",
+        "kf_tab_overview": "Repositories", "kf_target": "will be installed into {path} — {where}",
+        "kf_keyring_info": "{role}{package} · used by {count} repository(ies)",
+        "kf_keyring_global": "{role}{package} · trusted for every repository without Signed-By",
+        "rp_col_repo": "Repository", "rp_col_suite": "Suite", "rp_col_type": "Type",
+        "rp_col_keyring": "Signing keyring", "rp_col_status": "Status",
+        "rp_role_debian": "Debian", "rp_role_debian-security": "Debian security",
+        "rp_role_edukasaun": "Edukasaun OS", "rp_role_ubuntu": "Ubuntu", "rp_role_third-party": "Third-party",
+        "rp_status_ok": "OK", "rp_status_disabled": "Disabled", "rp_status_unreachable": "Unreachable",
+        "rp_status_missing-key": "Missing GPG key", "rp_status_expired-key": "Expired GPG key",
+        "rp_status_unsigned": "Not signed", "rp_status_duplicate": "Duplicate",
+        "kr_package": "package keyring", "kr_scoped": "repository keyring", "kr_global": "global keyring",
+        "kr_legacy": "legacy trusted.gpg", "kr_embedded": "embedded key", "kr_none": "global keyrings",
+        "menu_addrepo": "Add &Repo", "menu_upgrade": "Upgrade &OS",
+        "banner_os": "Upgrade OS: {os} can move to the new Debian {version} \"{codename}\" base.",
+        "open_upgrade": "Upgrade OS",
+        "ar_title": "Add Repo — Add a Repository",
+        "ar_intro": "Paste the repository line from the vendor's instructions or fill in the fields. EUS adds it, refreshes it on its own, and when the repository asks for a GPG key that is not installed, EUS searches the vendor's site and the keyservers for exactly that key, installs it into /etc/apt/keyrings/<name>.gpg and sets Signed-By, so the repository can be used right away.",
+        "ar_line": "Repository line", "ar_fields": "Fields", "ar_mode": "Enter the repository as",
+        "ar_auto_key": "Find and install the signing key automatically",
+        "ar_add": "Add Repository", "ar_added": "The repository was added and is ready to use.",
+        "ar_key_found": "Signing key found at {source}:", "ar_invalid_line": "Enter a line such as: deb https://repo.example.org/debian stable main",
+        "os_title": "Upgrade OS", "os_from_to": "{os}: Debian {current} → Debian {target}",
+        "os_intro": "A new Debian stable release is available as the base of Edukasaun OS. EUS first brings the current release up to date, then switches every repository that offers the new release to its new codename. Third-party repositories that do not offer it yet stay on their current suite, so nothing conflicts. All repository files are backed up and restored automatically if the new repositories cannot be loaded.",
+        "os_col_repo": "Repository", "os_col_current": "Current suite", "os_col_new": "New suite",
+        "os_col_action": "Action", "os_action_switch": "Switch", "os_action_keep": "Keep (no new release)",
+        "os_action_unchanged": "Unchanged", "os_action_missing": "Not ready",
+        "os_checking": "Checking every repository for the new release…",
+        "os_blocked": "The upgrade cannot start yet: a distribution repository does not offer the new release.",
+        "os_warning": "Save your work and keep the computer connected to power and network. The upgrade can take a long time; a restart is required at the end.",
+        "os_start": "Upgrade OS", "os_confirm": "Upgrade to Debian {target} now?\n\nThis can take a long time. Do not turn the computer off.",
+        "os_done": "The operating system was upgraded. Restart the computer to finish.",
+        "os_none": "No new Debian base release is available.",
     },
     "id": {
         "menu_updates": "&Pembaruan", "menu_kernel": "&Kernel", "menu_keyfix": "Key &Fix",
@@ -1227,7 +1263,7 @@ class KeyFixDialog(QDialog):
         self.changed = False
         self.scanner: QProcess | None = None
         self.setWindowTitle(self.t("kf_title"))
-        self.resize(860, 600)
+        self.resize(980, 640)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.addWidget(QLabel(self.t("kf_title"), objectName="dialogTitle"))
@@ -1236,6 +1272,19 @@ class KeyFixDialog(QDialog):
         layout.addWidget(intro)
 
         self.tabs = QTabWidget()
+        self.overview = QTreeWidget(objectName="keyTree")
+        self.overview.setColumnCount(5)
+        self.overview.setHeaderLabels([self.t("rp_col_status"), self.t("rp_col_repo"), self.t("rp_col_suite"),
+                                       self.t("rp_col_type"), self.t("rp_col_keyring")])
+        self.overview.setRootIsDecorated(False)
+        self.overview.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        header = self.overview.header()
+        for column in (0, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.overview.setColumnWidth(1, 300)
+        self.tabs.addTab(self.overview, self.t("kf_tab_overview"))
         keys_page = QWidget()
         keys_layout = QVBoxLayout(keys_page)
         self.keys_tree = self.make_tree()
@@ -1262,6 +1311,7 @@ class KeyFixDialog(QDialog):
         repo_buttons.addWidget(self.fix_dups_button)
         repos_layout.addWidget(self.repos_tree, 1)
         repos_layout.addLayout(repo_buttons)
+        self.repos_page = repos_page
         self.tabs.addTab(repos_page, self.t("kf_tab_repos"))
         layout.addWidget(self.tabs, 1)
 
@@ -1279,6 +1329,8 @@ class KeyFixDialog(QDialog):
         layout.addLayout(bottom)
         self.pending = ""
         self.scan()
+        # Used when documenting the dialog: EUS_KEYFIX_TAB=1 opens the GPG keys tab.
+        self.tabs.setCurrentIndex(int(os.environ.get("EUS_KEYFIX_TAB", "0") or 0))
 
     def reject(self) -> None:
         if not self.task.running():
@@ -1323,6 +1375,7 @@ class KeyFixDialog(QDialog):
         self.set_buttons(False)
         repos = run_tool_json("scan-repos") or {}
         self.populate_repos(repos)
+        self.populate_overview()
         self.scanner = QProcess(self)
         self.scanner.finished.connect(self.keys_scanned)
         self.scanner.errorOccurred.connect(lambda _e: self.keys_scanned(1))
@@ -1346,16 +1399,55 @@ class KeyFixDialog(QDialog):
         self.populate_keys(data)
         self.set_buttons(not self.task.running())
 
+    def populate_overview(self) -> None:
+        self.overview.clear()
+        if REPOSITORIES_FIXTURE:
+            try:
+                repositories = json.loads(Path(REPOSITORIES_FIXTURE).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                repositories = []
+        else:
+            repositories = run_tool_json("repositories", timeout=30) or []
+        colors = {"ok": "#0F7B4F", "disabled": "#6B7280", "duplicate": "#9A5B00"}
+        for repo in repositories:
+            keyring = repo.get("signed_by") or ""
+            if keyring == "(embedded key)" or not keyring.startswith("/"):
+                keyring_text = self.t("kr_" + repo.get("keyring_role", "none"))
+            else:
+                keyring_text = f"{keyring}  ({self.t('kr_' + repo.get('keyring_role', 'scoped'))})"
+            row = QTreeWidgetItem([
+                self.t("rp_status_" + repo.get("status", "ok")),
+                f"{repo.get('uri', '')}  {' '.join(repo.get('components', []))}",
+                " ".join(repo.get("suites", [])),
+                self.t("rp_role_" + repo.get("role", "third-party")),
+                keyring_text,
+            ])
+            tip = f"{repo.get('file', '')}:{repo.get('line', '')}"
+            if repo.get("origin"):
+                tip += f"\nOrigin: {repo['origin']}  Codename: {repo.get('codename', '')}"
+            for column in range(5):
+                row.setToolTip(column, tip)
+            row.setForeground(0, QBrush(QColor(colors.get(repo.get("status"), "#B42318"))))
+            font = row.font(0)
+            font.setBold(True)
+            row.setFont(0, font)
+            self.overview.addTopLevelItem(row)
+
     def populate_keys(self, data: dict) -> None:
         self.keys_tree.clear()
         apt = data.get("apt", {})
         for item in apt.get("unreachable", []):
             self.add_row(self.keys_tree, item.get("url", ""),
                          f"{self.t('kf_unreachable')}: {item.get('reason', '')}", severe=False)
-        for item in apt.get("missing_keys", []):
-            self.add_row(self.keys_tree, f"{item['keyid']}  {item.get('url', '')}", self.t("kf_missing"))
-        for item in apt.get("expired_keys", []):
-            self.add_row(self.keys_tree, f"{item['keyid']}  {item.get('url', '')}", self.t("kf_expired"))
+        for key, items in (("kf_missing", apt.get("missing_keys", [])),
+                           ("kf_expired", apt.get("expired_keys", []))):
+            for item in items:
+                text = self.t(key)
+                target = run_tool_json("key-target", item.get("url") or "-", item["keyid"]) or {}
+                if target.get("path"):
+                    where = self.t("kr_" + target.get("role", "scoped"))
+                    text += " — " + self.t("kf_target", path=target["path"], where=where)
+                self.add_row(self.keys_tree, f"{item['keyid']}  {item.get('url', '')}", text)
         for url in apt.get("unsigned", []):
             self.add_row(self.keys_tree, url, self.t("kf_unsigned"))
         for source in apt.get("signed_by_conflicts", []):
@@ -1375,6 +1467,18 @@ class KeyFixDialog(QDialog):
             note = self.t("kf_no_refresh")
         if self.keys_tree.topLevelItemCount() == 0:
             self.add_ok_row(self.keys_tree, self.t("kf_ok_keys"))
+        # Then every keyring EUS knows about, with its location role.
+        for keyring in data.get("files", []):
+            if keyring.get("problems"):
+                continue
+            package = f" ({keyring['package']})" if keyring.get("package") else ""
+            role = keyring.get("role", "scoped")
+            info = self.t("kf_keyring_global" if role in {"global", "legacy"} else "kf_keyring_info",
+                          role=self.t("kr_" + role), package=package, count=len(keyring.get("used_by", [])))
+            row = QTreeWidgetItem([keyring["path"], info])
+            row.setToolTip(1, keyring.get("role_text", ""))
+            row.setForeground(1, QBrush(QColor("#4B5563")))
+            self.keys_tree.addTopLevelItem(row)
         self.keys_note.setText(note)
 
     def populate_repos(self, data: dict) -> None:
@@ -1393,7 +1497,7 @@ class KeyFixDialog(QDialog):
         if self.repos_tree.topLevelItemCount() == 0:
             self.add_ok_row(self.repos_tree, self.t("kf_ok_repos"))
         self.repos_note.setText(", ".join(data.get("files", [])))
-        self.tabs.setTabText(1, self.t("kf_tab_repos") + (f" ({count})" if count else ""))
+        self.tabs.setTabText(self.tabs.indexOf(self.repos_page), self.t("kf_tab_repos") + (f" ({count})" if count else ""))
 
     def fix_keys(self) -> None:
         self.pending = "keys"
@@ -1765,6 +1869,290 @@ class SettingsDialog(QDialog):
             self.accept()
 
 
+def read_os_upgrade() -> dict[str, str]:
+    data = read_key_values(OS_UPGRADE_FILE)
+    return data if data.get("available") == "1" and data.get("target_codename") else {}
+
+
+class AddRepoDialog(QDialog):
+    """Add a repository; its signing key is found and installed automatically."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.setWindowTitle(self.t("ar_title"))
+        self.resize(760, 600)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(self.t("ar_title"), objectName="dialogTitle"))
+        intro = QLabel(self.t("ar_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        self.name = QLineEdit()
+        self.name.setPlaceholderText(self.t("ak_name_hint"))
+        form.addRow(self.t("ak_name"), self.name)
+        layout.addLayout(form)
+
+        mode_box = QGroupBox(self.t("ar_mode"))
+        grid = QGridLayout(mode_box)
+        self.line_radio = QRadioButton(self.t("ar_line"))
+        self.fields_radio = QRadioButton(self.t("ar_fields"))
+        self.line = QLineEdit()
+        self.line.setFont(mono_font())
+        self.line.setPlaceholderText("deb [arch=amd64] https://repo.example.org/debian stable main")
+        grid.addWidget(self.line_radio, 0, 0)
+        grid.addWidget(self.line, 0, 1)
+        grid.addWidget(self.fields_radio, 1, 0, Qt.AlignmentFlag.AlignTop)
+        fields = QWidget()
+        fields_form = QFormLayout(fields)
+        fields_form.setContentsMargins(0, 0, 0, 0)
+        self.repo_uri = QLineEdit()
+        self.repo_uri.setPlaceholderText("https://repo.example.org/debian")
+        self.suite = QLineEdit()
+        self.suite.setPlaceholderText("stable / trixie")
+        self.components = QLineEdit("main")
+        self.arch = QLineEdit()
+        self.arch.setPlaceholderText(f"amd64 ({self.t('ak_optional')})")
+        fields_form.addRow(self.t("ak_repo_uri"), self.repo_uri)
+        fields_form.addRow(self.t("ak_suite"), self.suite)
+        fields_form.addRow(self.t("ak_components"), self.components)
+        fields_form.addRow(self.t("ak_arch"), self.arch)
+        grid.addWidget(fields, 1, 1)
+        self.line_radio.setChecked(True)
+        self.line.textChanged.connect(lambda _t: self.line_radio.setChecked(True))
+        for widget in (self.repo_uri, self.suite, self.arch):
+            widget.textEdited.connect(lambda _t: self.fields_radio.setChecked(True))
+        layout.addWidget(mode_box)
+
+        self.deb_src = QCheckBox(self.t("ak_source_pkgs"))
+        self.auto_key = QCheckBox(self.t("ar_auto_key"))
+        self.auto_key.setChecked(True)
+        layout.addWidget(self.deb_src)
+        layout.addWidget(self.auto_key)
+        layout.addStretch(1)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        buttons = QHBoxLayout()
+        self.add_button = QPushButton(self.t("ar_add"), objectName="primaryButton")
+        self.add_button.clicked.connect(self.submit)
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
+        close.clicked.connect(self.reject)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self.add_button)
+        layout.addLayout(buttons)
+        self.line.textChanged.connect(self.guess_name)
+
+    def reject(self) -> None:
+        if not self.task.running():
+            super().reject()
+
+    def guess_name(self) -> None:
+        if self.name.isModified() and self.name.text():
+            return
+        match = re.search(r"(?:https?|ftp)://([^/\s]+)(/\S*)?", self.line.text())
+        if match:
+            host = match.group(1).lower()
+            host = re.sub(r"^(www|deb|apt|repo|download|packages|ppa)\.", "", host)
+            self.name.setText(re.sub(r"[^a-z0-9]+", "-", host.rsplit(".", 1)[0]).strip("-")[:40])
+
+    def submit(self) -> None:
+        name = self.name.text().strip().lower()
+        if not NAME_PATTERN.match(name):
+            QMessageBox.warning(self, self.t("ar_title"), self.t("ak_invalid_name"))
+            return
+        args = ["--name", name]
+        if self.line_radio.isChecked():
+            line = " ".join(self.line.text().split())
+            if not re.match(r"^(deb|deb-src)\s+(\[[^\]]*\]\s+)?(https?|ftp|file)://\S+\s+\S+", line):
+                QMessageBox.warning(self, self.t("ar_title"), self.t("ar_invalid_line"))
+                return
+            args += ["--line", line]
+        else:
+            uri, suite = self.repo_uri.text().strip(), self.suite.text().strip()
+            components = " ".join(self.components.text().split())
+            if not re.match(r"^(https?|ftp|file)://\S+$", uri) or not suite or \
+                    (not components and not suite.endswith("/")):
+                QMessageBox.warning(self, self.t("ar_title"), self.t("ak_invalid_repo"))
+                return
+            args += ["--repo-uri", uri, "--suite", suite]
+            if components:
+                args += ["--components", components]
+            if self.arch.text().strip():
+                args += ["--arch", " ".join(self.arch.text().split())]
+        if self.deb_src.isChecked():
+            args.append("--with-source")
+        if self.auto_key.isChecked():
+            args.append("--auto-key")
+        if self.task.start("add-repo", args, self.t("working")):
+            self.add_button.setEnabled(False)
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.add_button.setEnabled(True)
+        if not success:
+            QMessageBox.critical(self, self.t("ar_title"), detail)
+            return
+        self.changed = True
+        try:
+            report = json.loads(REPORT_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+        lines = [self.t("ar_added"), ""]
+        if report.get("keys"):
+            lines.append(self.t("ar_key_found", source=report.get("key_source", "")))
+            lines += [f"  {k.get('uid', '')}\n  {k.get('fingerprint', '')}" for k in report["keys"]]
+            lines.append("")
+        lines += [f"• {action}" for action in report.get("actions", [])]
+        QMessageBox.information(self, self.t("ar_title"), "\n".join(lines))
+        self.accept()
+
+
+class UpgradeOSDialog(QDialog):
+    """Move Edukasaun OS to a new Debian stable base release."""
+
+    def __init__(self, owner: "UpdateWindow") -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.t = owner.t
+        self.changed = False
+        self.state = read_os_upgrade()
+        self.plan: dict = {}
+        self.loader: QProcess | None = None
+        self.setWindowTitle(self.t("os_title"))
+        self.resize(900, 620)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(self.t("os_title"), objectName="dialogTitle"))
+        self.headline = QLabel(objectName="runningKernel")
+        layout.addWidget(self.headline)
+        intro = QLabel(self.t("os_intro"), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.tree = QTreeWidget(objectName="kernelTree")
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels([self.t("os_col_repo"), self.t("os_col_current"), self.t("os_col_new"),
+                                   self.t("os_col_action")])
+        self.tree.setRootIsDecorated(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            self.tree.header().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.tree, 1)
+        self.note = QLabel(objectName="bannerText")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        warning = QLabel(self.t("os_warning"), objectName="muted")
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+
+        self.task = PrivilegedTask(owner, self)
+        self.task.finished.connect(self.task_finished)
+        layout.addWidget(self.task)
+        buttons = QHBoxLayout()
+        self.start_button = QPushButton(self.t("os_start"), objectName="primaryButton")
+        self.start_button.setEnabled(False)
+        self.start_button.clicked.connect(self.start_upgrade)
+        close = QPushButton(self.t("close"), objectName="secondaryButton")
+        close.clicked.connect(self.reject)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self.start_button)
+        layout.addLayout(buttons)
+        self.load()
+
+    def reject(self) -> None:
+        if not self.task.running():
+            super().reject()
+
+    def load(self) -> None:
+        if not self.state:
+            self.headline.setText(self.t("os_none"))
+            return
+        self.headline.setText(self.t(
+            "os_from_to", os=self.state.get("os_name", "Edukasaun OS"),
+            current=f"{self.state.get('current_version', '').split('.')[0]} \"{self.state.get('current_codename', '')}\"",
+            target=f"{self.state.get('target_version', '').split('.')[0]} \"{self.state['target_codename']}\""))
+        self.note.setText(self.t("os_checking"))
+        if OS_PLAN_FIXTURE:
+            try:
+                self.populate(json.loads(Path(OS_PLAN_FIXTURE).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                self.populate({})
+            return
+        self.loader = QProcess(self)
+        self.loader.finished.connect(self.loaded)
+        self.loader.errorOccurred.connect(lambda _e: self.loaded(1))
+        command = tool_command("os-plan", "--target", self.state["target_codename"])
+        self.loader.start(command[0], command[1:])
+
+    def loaded(self, exit_code: int, _status=None) -> None:
+        if self.loader is None:
+            return
+        loader, self.loader = self.loader, None
+        try:
+            data = json.loads(bytes(loader.readAllStandardOutput()).decode("utf-8", "replace")) \
+                if exit_code == 0 else {}
+        except ValueError:
+            data = {}
+        loader.deleteLater()
+        self.populate(data)
+
+    def populate(self, plan: dict) -> None:
+        self.plan = plan
+        self.tree.clear()
+        colors = {"switch": "#0F7B4F", "keep": "#9A5B00", "unchanged": "#6B7280", "missing": "#B42318"}
+        for row in plan.get("entries", []):
+            item = QTreeWidgetItem([row["uri"], row["suite"], row.get("new_suite") or row["suite"],
+                                    self.t("os_action_" + row["action"])])
+            tip = f"{row['file']}:{row['line']}" + (f"\n{row['note']}" if row.get("note") else "")
+            for column in range(4):
+                item.setToolTip(column, tip)
+            item.setForeground(3, QBrush(QColor(colors.get(row["action"], "#202020"))))
+            font = item.font(3)
+            font.setBold(True)
+            item.setFont(3, font)
+            self.tree.addTopLevelItem(item)
+        if not plan:
+            self.note.setText(self.t("failed"))
+        elif plan.get("blocking"):
+            self.note.setText(self.t("os_blocked"))
+        else:
+            self.note.setText("")
+        self.start_button.setEnabled(bool(plan.get("entries")) and not plan.get("blocking"))
+
+    def start_upgrade(self) -> None:
+        target = self.state.get("target_codename", "")
+        answer = QMessageBox.question(self, self.t("os_title"),
+                                      self.t("os_confirm", target=f"{self.state.get('target_version', '').split('.')[0]} \"{target}\""),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes and self.task.start("os-upgrade", [target], self.t("working")):
+            self.start_button.setEnabled(False)
+
+    def task_finished(self, success: bool, detail: str) -> None:
+        self.changed = True
+        if not success:
+            QMessageBox.critical(self, self.t("os_title"), detail)
+            self.start_button.setEnabled(True)
+            return
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setWindowTitle(self.t("os_title"))
+        dialog.setText(self.t("os_done"))
+        restart = dialog.addButton(self.t("restart_now"), QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton(self.t("restart_later"), QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is restart:
+            self.owner.request_reboot()
+        self.accept()
+
+
 class UpdateWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1860,8 +2248,14 @@ class UpdateWindow(QMainWindow):
         self.keyfix_action.triggered.connect(self.show_key_fix)
         self.addkey_action = bar.addAction(self.t("menu_addkey"))
         self.addkey_action.triggered.connect(self.show_add_key)
+        self.addrepo_action = bar.addAction(self.t("menu_addrepo"))
+        self.addrepo_action.triggered.connect(self.show_add_repo)
         self.settings_action = bar.addAction(self.t("menu_settings"))
         self.settings_action.triggered.connect(self.show_settings)
+        # Shown only while a new Debian base release is available.
+        self.upgrade_action = bar.addAction(self.t("menu_upgrade"))
+        self.upgrade_action.triggered.connect(self.show_upgrade_os)
+        self.upgrade_action.setVisible(False)
         help_menu = bar.addMenu(self.t("menu_help"))
         log_action = QAction(self.t("action_log"), self)
         log_action.triggered.connect(self.show_log)
@@ -1871,7 +2265,7 @@ class UpdateWindow(QMainWindow):
         help_menu.addAction(about_action)
         self.busy_actions = [self.check_action, self.install_action, self.history_action,
                              self.kernel_action, self.keyfix_action, self.addkey_action,
-                             self.settings_action]
+                             self.addrepo_action, self.settings_action, self.upgrade_action]
 
     def make_banner(self, kind: str, button_text: str, handler) -> tuple[QFrame, QLabel, QPushButton]:
         frame = QFrame(objectName=f"banner_{kind}")
@@ -1919,7 +2313,9 @@ class UpdateWindow(QMainWindow):
                                                                     self.show_kernels)
         self.restart_banner, self.restart_label, _ = self.make_banner("restart", self.t("restart_now"),
                                                                       self.confirm_reboot)
-        for banner in (self.restart_banner, self.repo_banner, self.pause_banner, self.kernel_banner):
+        self.os_banner, self.os_label, _ = self.make_banner("os", self.t("open_upgrade"), self.show_upgrade_os)
+        for banner in (self.os_banner, self.restart_banner, self.repo_banner, self.pause_banner,
+                       self.kernel_banner):
             body_layout.addWidget(banner)
 
         status_card = QFrame(objectName="statusCard")
@@ -2047,6 +2443,7 @@ class UpdateWindow(QMainWindow):
             QFrame#banner_pause { background: #FFFAEB; border: 1px solid #FEC84B; border-radius: 6px; }
             QFrame#banner_repo { background: #FEF3F2; border: 1px solid #FDA29B; border-radius: 6px; }
             QFrame#banner_kernel { background: #EFF8FF; border: 1px solid #84CAFF; border-radius: 6px; }
+            QFrame#banner_os { background: #F4F3FF; border: 1px solid #9B8AFB; border-radius: 6px; }
             QFrame#banner_restart { background: #FFF6ED; border: 1px solid #F7B27A; border-radius: 6px; }
             QPushButton#bannerButton { background: #FFFFFF; border: 1px solid #B8C2BE; border-radius: 4px;
                 padding: 0 10px; min-height: 26px; }
@@ -2111,7 +2508,7 @@ class UpdateWindow(QMainWindow):
     def setup_watcher(self) -> None:
         """Reload when a background refresh (timer or new repository) changes the state."""
         self.watcher = QFileSystemWatcher(self)
-        for path in (STATE_FILE.parent, PAUSE_FILE.parent):
+        for path in (STATE_FILE.parent, PAUSE_FILE.parent, OS_UPGRADE_FILE.parent):
             if path.is_dir():
                 self.watcher.addPath(str(path))
         self.watcher.directoryChanged.connect(lambda _p: self.reload_timer.start())
@@ -2124,6 +2521,13 @@ class UpdateWindow(QMainWindow):
 
     # ------------------------------------------------------------- banners
     def refresh_banners(self) -> None:
+        upgrade = read_os_upgrade()
+        if upgrade:
+            self.os_label.setText(self.t("banner_os", os=upgrade.get("os_name", "Edukasaun OS"),
+                                         version=upgrade.get("target_version", "").split(".")[0],
+                                         codename=upgrade["target_codename"]))
+        self.os_banner.setVisible(bool(upgrade))
+        self.upgrade_action.setVisible(bool(upgrade))
         until = paused_until()
         self.pause_label.setText(self.t("banner_paused", date=format_date(until)))
         self.pause_banner.setVisible(bool(until))
@@ -2366,7 +2770,8 @@ class UpdateWindow(QMainWindow):
             widget.setEnabled(not busy)
         for action in self.busy_actions:
             action.setEnabled(not busy)
-        for banner in (self.pause_banner, self.repo_banner, self.kernel_banner, self.restart_banner):
+        for banner in (self.pause_banner, self.repo_banner, self.kernel_banner, self.restart_banner,
+                       self.os_banner):
             banner.setEnabled(not busy)
         can_install = not busy and bool(self.selected_records())
         self.install_button.setEnabled(can_install)
@@ -2729,6 +3134,7 @@ class UpdateWindow(QMainWindow):
 
     def open_page(self, page: str) -> None:
         handlers = {"kernel": self.show_kernels, "key-fix": self.show_key_fix,
+                    "add-repo": self.show_add_repo, "upgrade-os": self.show_upgrade_os,
                     "add-key": self.show_add_key, "settings": self.show_settings}
         if page in handlers and QApplication.activeModalWidget() is None:
             handlers[page]()
@@ -2738,6 +3144,12 @@ class UpdateWindow(QMainWindow):
 
     def show_key_fix(self) -> None:
         self.run_dialog(KeyFixDialog(self))
+
+    def show_add_repo(self) -> None:
+        self.run_dialog(AddRepoDialog(self))
+
+    def show_upgrade_os(self) -> None:
+        self.run_dialog(UpgradeOSDialog(self))
 
     def show_add_key(self) -> None:
         self.run_dialog(AddKeyDialog(self))

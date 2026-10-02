@@ -1,6 +1,6 @@
 # Eduka-Update-System (EUS)
 
-![Version](https://img.shields.io/badge/version-0.13-17845b)
+![Version](https://img.shields.io/badge/version-0.14-17845b)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Platform](https://img.shields.io/badge/platform-Edukasaun%20OS%20%7C%20Debian-orange)
 
@@ -29,7 +29,17 @@ separate application.
 - Installation-only history with success/failure status and a clear action.
 - Automatic language selection from the session locale: English, Tetum,
   Portuguese, or Indonesian.
-- Version shown in **About**; the public version is exactly `0.13`.
+- Version shown in **About**; the public version is exactly `0.14`.
+
+### Added in 0.14: a smarter updater
+
+| Feature | What it does |
+| --- | --- |
+| **Keyring locations** | Before fixing a key, EUS decides where it belongs for that repository: a `Signed-By` file owned by a package (normally in `/usr/share/keyrings`) is never edited — its package is reinstalled, and only if the key is still missing a copy with the new key goes to `/etc/apt/keyrings` and `Signed-By` is repointed; an admin `Signed-By` file is updated in place; a third-party repository without `Signed-By` gets `/etc/apt/keyrings/<repo>.gpg` plus a `Signed-By` option; only distribution repositories without `Signed-By` use `/etc/apt/trusted.gpg.d`. Key Fix shows this for every repository (**Repositories** tab) and every keyring. |
+| **Automatic key search** | A missing key is searched on the repository's own site (`Release.key`, `KEY.gpg`, `public.key`, … over HTTPS) and on the keyservers. A key is accepted only if its fingerprint or signing subkey matches the key ID APT reported. |
+| **Add Repo** | Paste a `deb …` line (or fill in fields). EUS adds the repository, refreshes only that repository, finds and installs its signing key automatically, writes `Signed-By`, verifies it, and refreshes the update list. Nothing is left behind if the repository is unreachable, unsigned, or its key cannot be found. |
+| **Upgrade OS** | After each check EUS asks the Debian mirror which release is stable. When a newer Debian stable exists than the one Edukasaun OS is based on, **Upgrade OS** appears (banner, menu, desktop notification). The dialog lists every repository: distribution and third-party repositories that offer the new codename are switched (`trixie` → `forky`, `trixie-updates` → `forky-updates`, `trixie-security` → `forky-security`); third-party repositories without it are kept on their current suite; suites like `stable` are unchanged. The upgrade refuses to start while a Debian repository lacks the new release or disk space is short, brings the current release up to date first, backs up all source files, restores them automatically if the new repositories cannot be loaded, then runs the standard minimal and full upgrade. |
+| **Notifications** | Updates available, Upgrade OS available, a repository needs a GPG key (with a button that opens Key Fix), old kernels after a restart, and restart required. |
 
 ### Menus added in 0.13
 
@@ -70,13 +80,16 @@ Useful commands:
 
 ```bash
 eduka-update-system --version
-eduka-update-system --open kernel            # or key-fix, add-key, settings
+eduka-update-system --open kernel            # or key-fix, add-key, add-repo, upgrade-os, settings
 eduka-update-system --list-kernels
 eduka-update-system --remove-old-kernels
 eduka-update-system --install-kernel linux-image-amd64 --headers
 eduka-update-system --fix-keys
 eduka-update-system --fix-duplicates
 eduka-update-system --add-key vendor ./vendor.asc https://repo.example.org/apt stable main
+eduka-update-system --add-repo vendor 'deb https://repo.example.org/apt stable main'
+eduka-update-system --check-os               # is a new Debian base available?
+eduka-update-system --upgrade-os             # show the repository plan, then upgrade
 eduka-update-system --pause 7                # --resume to undo
 eduka-update-system --schedule daily 08:30   # or: --schedule interval 12
 systemctl status eus-refresh.timer eus-sources.path
@@ -90,7 +103,7 @@ Use `./install.sh --no-deps` when all runtime packages are already installed.
 Build the package from a checkout (needs only `dpkg-deb`):
 
 ```bash
-make deb          # -> dist/eduka-update-system_0.13_all.deb
+make deb          # -> dist/eduka-update-system_0.14_all.deb
 ```
 
 A prebuilt package is also kept in `releases/`. Copy it into the Cubic
@@ -98,7 +111,7 @@ chroot (drag it into the Cubic terminal window) and install it with APT so
 the dependencies are resolved:
 
 ```bash
-apt install ./eduka-update-system_0.13_all.deb
+apt install ./eduka-update-system_0.14_all.deb
 ```
 
 The package enables `eus-refresh.timer` and `eus-sources.path` without

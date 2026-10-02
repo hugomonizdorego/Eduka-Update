@@ -5,7 +5,7 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.13'
+VERSION='0.14'
 GUI='/usr/local/libexec/eduka-update-system-gui'
 PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
@@ -14,6 +14,15 @@ RESTART_FILE='/var/lib/eus/restart-required'
 TSV_FILE='/var/lib/eus/updates.tsv'
 PAUSE_FILE='/etc/eus/pause'
 TOOL='/usr/local/libexec/eduka-update-system-tool'
+OS_UPGRADE_FILE='/var/lib/eus/os-upgrade'
+APT_UPDATE_LOG='/var/lib/eus/apt-update.log'
+# Notification texts added in 0.14 (English).
+OS_UPGRADE_TITLE='Upgrade OS available'
+OS_UPGRADE_BODY='%s can move to the new Debian %s "%s" base. Open Upgrade OS to see which repositories will change.'
+OPEN_UPGRADE='Open Upgrade OS'
+KEY_TITLE='A repository needs a GPG key'
+KEY_BODY='%s repository signing key(s) are missing, so those repositories are ignored. Key Fix can find and install them automatically.'
+OPEN_KEYFIX='Open Key Fix'
 CONFIG_FILE='/etc/eus/eus.conf'
 VERSION_FILE='/etc/eus/version'
 CHECK_INTERVAL_SECONDS=60
@@ -317,7 +326,7 @@ Usage: eduka-update-system [OPTION]
 
 Graphical interface:
   --ui                         open the update manager (default)
-  --open kernel|key-fix|add-key|settings
+  --open kernel|key-fix|add-key|add-repo|upgrade-os|settings
                                open the manager directly on one dialog
 
 Terminal:
@@ -331,6 +340,11 @@ Terminal:
   --install-kernel PACKAGE [--headers]
   --remove-kernel RELEASE...   remove kernels (never the running one)
   --remove-old-kernels         remove every kernel older than the running one
+  --add-repo NAME 'deb URI SUITE COMPONENT...'
+                               add a repository; its GPG key is found and
+                               installed automatically
+  --check-os                   check for a new Debian base release
+  --upgrade-os                 show the repository plan and upgrade the OS
   --pause DAYS                 pause automatic checks and notifications
   --resume                     resume automatic checks
   --schedule interval HOURS | daily HH:MM
@@ -515,6 +529,97 @@ send_old_kernel_notification() {
     fi
 }
 
+notify_with_action() {
+    # notify_with_action ACTION-LABEL GUI-PAGE TITLE BODY URGENCY
+    local label="$1" page="$2" title="$3" body="$4" urgency="${5:-normal}" action
+    if notify-send --help 2>&1 | grep -q -- '--action'; then
+        (
+            action="$(notify-send --app-name="$APP_NAME" --icon=eduka-update-system \
+                --urgency="$urgency" --expire-time=60000 --action="default=$label" \
+                "$title" "$body" 2>/dev/null || true)"
+            [[ "$action" == 'default' ]] && /usr/local/bin/eduka-update-system --open "$page" >/dev/null 2>&1
+        ) &
+    else
+        notify-send --app-name="$APP_NAME" --icon=eduka-update-system --urgency="$urgency" \
+            "$title" "$body" || true
+    fi
+}
+
+read_os_upgrade() {
+    OS_AVAILABLE=0; OS_NAME='Edukasaun OS'; OS_TARGET=''; OS_TARGET_VERSION=''
+    [[ -r "$OS_UPGRADE_FILE" ]] || return 1
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+            available) [[ "$value" == 1 ]] && OS_AVAILABLE=1 ;;
+            os_name) OS_NAME="$value" ;;
+            target_codename) OS_TARGET="$value" ;;
+            target_version) OS_TARGET_VERSION="$value" ;;
+        esac
+    done <"$OS_UPGRADE_FILE"
+    [[ "$OS_AVAILABLE" -eq 1 && -n "$OS_TARGET" ]]
+}
+
+send_os_upgrade_notification() {
+    # Once per new release, even while updates are paused: it is not an update.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    read_os_upgrade || return 0
+    eus_gui_is_running && return 0
+    local cache_dir stamp_file
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/os-upgrade-notified"
+    mkdir -p "$cache_dir"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$OS_TARGET" ]] && return 0
+    printf '%s\n' "$OS_TARGET" >"$stamp_file"
+    notify_with_action "$OPEN_UPGRADE" upgrade-os "$OS_UPGRADE_TITLE" \
+        "$(printf "$OS_UPGRADE_BODY" "$OS_NAME" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET")" normal
+}
+
+send_missing_key_notification() {
+    # Repositories added in a terminal often lack their key: say so once.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    [[ -r "$APT_UPDATE_LOG" ]] || return 0
+    eus_gui_is_running && return 0
+    local keys cache_dir stamp_file hash count
+    keys="$(grep -oE 'NO_PUBKEY [0-9A-Fa-f]+|EXPKEYSIG [0-9A-Fa-f]+' "$APT_UPDATE_LOG" | sort -u)"
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/missing-key-notified"
+    mkdir -p "$cache_dir"
+    if [[ -z "$keys" ]]; then
+        rm -f -- "$stamp_file"
+        return 0
+    fi
+    hash="$(sha256sum <<<"$keys" | awk '{print $1}')"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$hash" ]] && return 0
+    printf '%s\n' "$hash" >"$stamp_file"
+    count="$(grep -c . <<<"$keys")"
+    notify_with_action "$OPEN_KEYFIX" key-fix "$KEY_TITLE" "$(printf "$KEY_BODY" "$count")" normal
+}
+
+terminal_add_repo() {
+    # --add-repo NAME 'deb [options] URI SUITE COMPONENT...'
+    local name="${1:-}" line="${2:-}"
+    if [[ -z "$name" || -z "$line" ]]; then
+        usage >&2
+        return 64
+    fi
+    invoke_root_terminal add-repo --name "$name" --line "$line" --auto-key
+}
+
+terminal_os_upgrade() {
+    invoke_root_terminal os-check >/dev/null || true
+    if ! read_os_upgrade; then
+        printf 'No new Debian base release is available.\n'
+        return 0
+    fi
+    printf '%s can move to Debian %s "%s".\n\nRepository plan:\n' "$OS_NAME" "$OS_TARGET_VERSION" "$OS_TARGET"
+    "$PYTHON" -I "$TOOL" os-plan --target "$OS_TARGET" --format text || return 1
+    local answer
+    read -r -p 'Start the OS upgrade now? This can take a long time. [y/N] ' answer
+    case "${answer,,}" in y|yes|s|sim|sin|i|iya|ya) ;; *) return 0 ;; esac
+    invoke_root_terminal os-upgrade "$OS_TARGET"
+}
+
 watch_updates() {
     local cache_dir lock_file
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
@@ -525,6 +630,8 @@ watch_updates() {
     sleep 5
     send_old_kernel_notification
     while true; do
+        send_os_upgrade_notification
+        send_missing_key_notification
         send_update_notification
         send_restart_notification
         sleep "$CHECK_INTERVAL_SECONDS"
@@ -540,7 +647,7 @@ case "$command_name" in
     --ui) launch_gui "$@" ;;
     --open)
         case "${1:-}" in
-            kernel|key-fix|add-key|settings) launch_gui --open "$1" ;;
+            kernel|key-fix|add-key|add-repo|upgrade-os|settings) launch_gui --open "$1" ;;
             *) usage >&2; exit 64 ;;
         esac
         ;;
@@ -561,6 +668,16 @@ case "$command_name" in
         invoke_root_terminal kernel-remove "$@"
         ;;
     --remove-old-kernels) terminal_remove_old_kernels ;;
+    --add-repo) terminal_add_repo "$@" ;;
+    --check-os)
+        invoke_root_terminal os-check >/dev/null
+        if read_os_upgrade; then
+            printf 'Upgrade OS available: Debian %s "%s".\n' "$OS_TARGET_VERSION" "$OS_TARGET"
+        else
+            printf 'No new Debian base release is available.\n'
+        fi
+        ;;
+    --upgrade-os) terminal_os_upgrade ;;
     --pause)
         [[ "${1:-}" =~ ^[0-9]+$ ]] || { usage >&2; exit 64; }
         invoke_root_terminal pause "$1"

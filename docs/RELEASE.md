@@ -1,7 +1,7 @@
 # Release procedure
 
 1. Update `VERSION`, the source constants, icon manifest, and changelog.
-2. Keep the visible version simple (for example `0.13`); do not add a build
+2. Keep the visible version simple (for example `0.14`); do not add a build
    suffix.
 3. Regenerate the Cubic installer (`make cubic-installer`) and run `make check`.
 4. Build the package with `make deb` and copy it to `releases/`.

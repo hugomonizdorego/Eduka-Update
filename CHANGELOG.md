@@ -3,6 +3,37 @@
 All notable changes to Eduka-Update-System are documented here. The project
 uses a single public version number without a build suffix.
 
+## 0.14 — 2026-10-02
+
+### Added
+
+- Keyring placement rules: EUS determines whether a repository's key belongs
+  in a package keyring (`/usr/share/keyrings`, never edited — the package is
+  reinstalled, or a copy is made in `/etc/apt/keyrings` and `Signed-By` is
+  repointed), in the repository's own `Signed-By` keyring, in a new
+  `/etc/apt/keyrings/<repo>.gpg` with `Signed-By` (third-party repositories),
+  or in `/etc/apt/trusted.gpg.d` (distribution repositories only).
+- Key Fix **Repositories** tab: origin (Debian, Debian security, Edukasaun OS,
+  Ubuntu, third-party), suite, signing keyring and its location type, and
+  status of every repository; every keyring is listed with its role and users.
+- Automatic signing-key search on the repository site and the keyservers,
+  accepted only when the key matches the ID reported by APT.
+- **Add Repo** dialog and `--add-repo`: add a repository, refresh it in
+  isolation, find and install its key, set `Signed-By`, verify, roll back on
+  failure.
+- **Upgrade OS**: detection of a new Debian stable base, repository plan
+  (switch / keep third-party / unchanged), guarded upgrade with backup and
+  automatic restore, banner, menu, notification, `--check-os` and
+  `--upgrade-os`.
+- Notification when a repository needs a GPG key.
+
+### Fixed
+
+- APT prints `Err:` for signature failures too; those repositories were
+  reported as unreachable instead of missing a key.
+- Key Fix crashed when downloading a missing key (`msg()` keyword clash).
+- Keyserver results are now verified against the requested key ID.
+
 ## 0.13 — 2026-10-01
 
 ### Added

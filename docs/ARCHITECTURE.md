@@ -25,7 +25,9 @@ The privileged backend owns shared state under `/var/lib/eus`:
 - `restart-required`: normalized restart marker; and
 - `history.tsv`: actual installation outcomes only;
 - `apt-update.log`: output of the last `apt-get update`, read by Key Fix; and
-- `repair-report.json`: result of the last Key Fix / Add Key operation.
+- `repair-report.json`: result of the last Key Fix / Add Key / Add Repo operation; and
+- `os-upgrade`: result of the last new-Debian-release check (`available`,
+  `current_codename`, `target_codename`, versions).
 
 Configuration in `/etc/eus`: `schedule` and `interval-hours` (check
 schedule; the timer drop-in lives in
@@ -59,3 +61,25 @@ modules. Do
 not move this validation into the GUI, because the GUI is outside the trust
 boundary.
 
+
+## Keyring placement
+
+| Repository | Key goes to |
+| --- | --- |
+| `Signed-By` file owned by a package (usually `/usr/share/keyrings`) | never edited; the package is reinstalled; if the key is still missing, a copy plus the key is written to `/etc/apt/keyrings/<repo>.gpg` and `Signed-By` is repointed |
+| `Signed-By` file not owned by a package | merged into that file |
+| third-party, no `Signed-By` | `/etc/apt/keyrings/<repo>.gpg`, and `Signed-By` is added |
+| distribution (Debian/Edukasaun/Ubuntu), no `Signed-By` | archive keyring package, then `/etc/apt/trusted.gpg.d/eus-<key>.gpg` |
+| key embedded in a `.sources` file | reported; replace it with Add Key |
+
+## OS upgrade
+
+1. `os-check` (after every refresh) reads `dists/stable/Release` from the
+   Debian mirror in use and compares it with the codename/version in APT's
+   lists.
+2. `os-plan` checks `dists/<new suite>/InRelease` for every repository.
+   Distribution repositories without it block the upgrade; third-party ones
+   are kept on their suite.
+3. `os-upgrade` (root): disk-space and plan check, full upgrade of the current
+   release, `os-switch` (backup + rewrite), `apt-get update` (restore on
+   failure or key errors), `upgrade --without-new-pkgs`, `full-upgrade`.

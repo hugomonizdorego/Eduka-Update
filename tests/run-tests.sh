@@ -34,6 +34,8 @@ PYTHONPYCACHEPREFIX="$TEST_DIR/pycache" python3 -m py_compile \
 
 # Repository, keyring and kernel helper on a fake APT tree.
 PYTHONPYCACHEPREFIX="$TEST_DIR/pycache" python3 "$PROJECT_DIR/tests/test_tool.py" >/dev/null
+# Keyring placement, automatic key discovery and the OS upgrade (local mirror).
+PYTHONPYCACHEPREFIX="$TEST_DIR/pycache" python3 "$PROJECT_DIR/tests/test_smart.py" >/dev/null
 help_text="$(bash "$PROJECT_DIR/src/launcher/eduka-update-system.sh" --help)"
 grep -q -- "--fix-keys" <<<"$help_text"
 
@@ -53,7 +55,7 @@ test -r "$TEST_DIR/root/etc/systemd/system/eus-sources.path"
 test -L "$TEST_DIR/root/usr/local/bin/eduka-upgrade-action.sh"
 test -r "$TEST_DIR/root/usr/share/applications/eduka-update-system.desktop"
 test -r "$TEST_DIR/root/etc/eus/version"
-grep -qx "VERSION='0.13'" "$TEST_DIR/root/etc/eus/version"
+grep -qx "VERSION='0.14'" "$TEST_DIR/root/etc/eus/version"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$PROJECT_DIR/data/applications/eduka-update-system.desktop"
