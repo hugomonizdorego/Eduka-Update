@@ -1,0 +1,246 @@
+// State shared between the Slint pages and the Rust controller.
+
+export struct UpdateRow {
+    category: string,
+    type-label: string,
+    color: color,
+    title: string,
+    summary: string,
+    version: string,
+    size: string,
+    checked: bool,
+    progress: int,          // -1: no bar
+    progress-text: string,
+    apt: bool,              // can be ignored (APT, not the major update)
+}
+
+export struct HealthRow {
+    header: bool,
+    ok: bool,
+    title: string,
+    detail: string,
+    label: string,
+    color: color,
+    checkable: bool,
+    checked: bool,
+    page: string,
+}
+
+export struct CleanRow {
+    header: bool,
+    title: string,
+    size: string,
+    detail: string,
+    checked: bool,
+}
+
+export struct KernelRow {
+    release: string,
+    state: string,
+    label: string,
+    version: string,
+    size: string,
+    checkable: bool,
+    checked: bool,
+    color: color,
+    background: color,
+}
+
+// Generic table row (Key Fix, Upgrade OS, ignored updates).
+export struct TableRow {
+    a: string,
+    b: string,
+    c: string,
+    d: string,
+    e: string,
+    color: color,
+    ok: bool,
+}
+
+export struct MsgButton {
+    id: string,
+    text: string,
+    primary: bool,
+}
+
+export global App {
+    // ---- shell
+    in-out property <string> page: "home";
+    in property <bool> busy;
+    in property <string> version;
+    in property <string> last-checked;
+    in property <string> progress-detail;
+    callback navigate(string);
+    callback reboot();
+
+    // ---- banners ("" hides them)
+    in property <string> self-banner;
+    in property <string> os-banner;
+    in property <string> os-action;
+    in property <string> restart-banner;
+    in property <string> health-banner;
+    in property <string> repo-banner;
+    in property <string> pause-banner;
+    in property <string> kernel-banner;
+    callback banner(string);
+
+    // ---- home
+    in property <string> home-status;
+    in property <string> home-detail;
+    in property <bool> show-major;
+    in property <int> updates-badge;
+    in property <int> health-badge;
+
+    // ---- updates
+    in property <string> status-title;
+    in-out property <[UpdateRow]> updates;
+    in-out property <int> current-update: -1;
+    in property <string> d-name;
+    in property <string> d-type;
+    in property <color> d-color;
+    in property <string> d-meta;
+    in property <string> d-text;
+    in property <string> d-advice;
+    in property <string> packages-text;
+    in property <string> changelog-text;
+    in-out property <int> details-tab;
+    in property <string> selection-text;
+    in property <bool> can-install;
+    in property <bool> all-checked;
+    in property <bool> show-progress;
+    callback check-updates();
+    callback install();
+    callback toggle-update(int);
+    callback select-all(bool);
+    callback select-security();
+    callback select-category(int);
+    callback ignore(int, bool);
+    callback current-changed(int);
+    callback details-changed(int);
+
+    // ---- health
+    in property <[HealthRow]> health;
+    in property <string> health-summary;
+    in property <bool> can-fix-health;
+    in property <bool> health-scanning;
+    callback scan-health();
+    callback fix-health();
+    callback toggle-health(int);
+    callback open-health(int);
+
+    // ---- privileged task of the tool pages
+    in property <bool> task-visible;
+    in property <string> task-text;
+    in property <int> task-value;
+
+    // ---- message box
+    in property <bool> msg-visible;
+    in property <string> msg-title;
+    in property <string> msg-text;
+    in property <[MsgButton]> msg-buttons;
+    callback msg-clicked(string);
+
+    // ---- cleaner
+    in property <[CleanRow]> clean-rows;
+    in property <string> clean-total;
+    in property <bool> can-clean;
+    in property <bool> clean-scanning;
+    callback clean-scan();
+    callback clean-toggle(int);
+    callback clean-run();
+
+    // ---- kernels
+    in property <string> kernel-running;
+    in property <[KernelRow]> kernels;
+    in property <[string]> kernel-available;
+    in-out property <int> kernel-choice;
+    in-out property <bool> kernel-headers;
+    in property <string> kernel-note;
+    in property <bool> kernel-loading;
+    in property <bool> can-remove-kernel;
+    in property <bool> can-remove-old;
+    callback kernel-refresh();
+    callback kernel-toggle(int);
+    callback kernel-remove();
+    callback kernel-remove-old();
+    callback kernel-install();
+
+    // ---- Key Fix
+    in-out property <int> keyfix-tab;
+    in property <[TableRow]> repo-overview;
+    in property <[TableRow]> key-rows;
+    in property <[TableRow]> dup-rows;
+    in property <string> keys-note;
+    in property <string> dups-note;
+    in property <string> dups-tab;
+    in property <bool> keyfix-scanning;
+    callback keyfix-scan();
+    callback fix-keys();
+    callback fix-duplicates();
+
+    // ---- Add Repository
+    in-out property <string> ar-name;
+    in-out property <bool> ar-line-mode: true;
+    in-out property <string> ar-line;
+    in-out property <string> ar-uri;
+    in-out property <string> ar-suite;
+    in-out property <string> ar-components: "main";
+    in-out property <string> ar-arch;
+    in-out property <bool> ar-source;
+    in-out property <bool> ar-auto-key: true;
+    callback ar-line-edited(string);
+    callback ar-submit();
+
+    // ---- Add Key
+    in-out property <string> ak-name;
+    in-out property <int> ak-source;     // 0 file, 1 URL, 2 keyserver
+    in-out property <string> ak-file;
+    in-out property <string> ak-url;
+    in-out property <string> ak-keyid;
+    in property <string> ak-key-info;
+    in-out property <bool> ak-with-repo;
+    in-out property <string> ak-uri;
+    in-out property <string> ak-suite;
+    in-out property <string> ak-components: "main";
+    in-out property <string> ak-arch;
+    in-out property <bool> ak-source-pkgs;
+    in property <string> ak-preview;
+    in property <bool> can-browse;
+    callback ak-changed();
+    callback ak-inspect();
+    callback ak-browse();
+    callback ak-submit();
+
+    // ---- Upgrade OS
+    in property <string> os-headline;
+    in property <[TableRow]> os-plan;
+    in property <string> os-note;
+    in property <bool> can-start-os;
+    callback os-start();
+
+    // ---- preferences
+    in-out property <int> pref-tab;
+    in-out property <bool> pref-daily;
+    in-out property <int> pref-interval;
+    in property <[string]> pref-intervals;
+    in-out property <string> pref-time;
+    in property <string> pause-status;
+    in property <bool> paused;
+    in-out property <int> pause-days: 7;
+    in-out property <int> pref-auto;
+    in property <[string]> pref-auto-choices;
+    in-out property <bool> pref-clean;
+    in-out property <bool> pref-timeshift;
+    in property <bool> has-timeshift;
+    in-out property <bool> pref-notify;
+    in property <[TableRow]> ignored;
+    in-out property <int> ignored-current: -1;
+    callback pause(int);
+    callback unignore();
+    callback save-prefs();
+
+    // ---- text viewers
+    in property <string> history-text;
+    in property <string> log-text;
+    callback clear-history();
+}

@@ -1,0 +1,330 @@
+// Eduka-Update-System main window: netbook-launcher style.
+// Categories on the left, the selected one points into a soft panel.
+
+import { Palette } from "std-widgets.slint";
+import { Theme, Tr, SidebarButton, Banner, ActionButton } from "widgets.slint";
+import { App, UpdateRow, HealthRow, CleanRow, KernelRow, TableRow, MsgButton } from "state.slint";
+import { HomePage, UpdatesPage, HealthPage, TilesPage } from "pages.slint";
+import { CleanerPage, KernelsPage, KeyFixPage, AddRepoPage, AddKeyPage, UpgradeOsPage, PrefsPage, TextPage, AboutPage } from "tools.slint";
+
+export { App, Tr, UpdateRow, HealthRow, CleanRow, KernelRow, TableRow, MsgButton }
+
+export component MainWindow inherits Window {
+    title: "Update Manager — Eduka-Update-System";
+    icon: @image-url("../../../assets/icons/hicolor/48x48/apps/eduka-update-system.png");
+    preferred-width: 860px;
+    preferred-height: 560px;
+    min-width: 700px;
+    min-height: 460px;
+    default-font-size: Theme.font-normal;
+    background: @linear-gradient(135deg, #EEF3EF 0%, #DCE6E0 100%);
+    init => {
+        Palette.color-scheme = ColorScheme.light;
+    }
+
+    property <string> nav: App.page == "cleaner" || App.page == "kernels" || App.page == "history" || App.page == "log" ? "maintenance"
+        : App.page == "keyfix" || App.page == "addrepo" || App.page == "addkey" ? "sources"
+        : App.page == "prefs" || App.page == "about" ? "settings"
+        : App.page == "upgrade" ? "home" : App.page;
+
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "r" || event.text == "R")) {
+                App.check-updates();
+                return accept;
+            }
+            if (event.text == Key.F5) {
+                App.check-updates();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "i" || event.text == "I")) {
+                App.install();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "h" || event.text == "H")) {
+                App.navigate("history");
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "q" || event.text == "Q")) {
+                App.navigate("quit");
+                return accept;
+            }
+            reject
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-top: 10px;
+            padding-right: 12px;
+            padding-bottom: 6px;
+            spacing: 0px;
+
+            // ---- sidebar
+            VerticalLayout {
+                width: 206px;
+                spacing: 5px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-bottom: 8px;
+                    padding-top: 2px;
+                    spacing: 8px;
+                    Image {
+                        source: @image-url("../../../assets/icons/hicolor/48x48/apps/eduka-update-system.png");
+                        width: 28px;
+                        height: 28px;
+                    }
+                    VerticalLayout {
+                        Text {
+                            text: "Update Manager";
+                            font-weight: 700;
+                            color: Theme.brand;
+                        }
+                        Text {
+                            text: "Edukasaun OS";
+                            color: #5B6B63;
+                        }
+                    }
+                }
+                for item in [
+                    { key: "home", kind: "home" },
+                    { key: "updates", kind: "updates" },
+                    { key: "health", kind: "health" },
+                    { key: "maintenance", kind: "maintenance" },
+                    { key: "sources", kind: "sources" },
+                    { key: "settings", kind: "settings" },
+                ]: SidebarButton {
+                    kind: item.kind;
+                    text: Tr.t("nav_" + item.key);
+                    selected: root.nav == item.key;
+                    badge: item.key == "updates" ? App.updates-badge : item.key == "health" ? App.health-badge : 0;
+                    clicked => {
+                        App.navigate(item.key);
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+                Text {
+                    text: "Eduka-Update-System " + App.version;
+                    color: #5B6B63;
+                    x: 8px;
+                    font-size: Theme.font-small;
+                }
+            }
+
+            // ---- panel and status line
+            VerticalLayout {
+                spacing: 4px;
+                horizontal-stretch: 1;
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: #FFFFFFF0;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: #143C281A;
+                    drop-shadow-blur: 18px;
+                    drop-shadow-offset-y: 2px;
+                    drop-shadow-color: #0000002D;
+                    VerticalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-top: 12px;
+                        padding-bottom: 10px;
+                        spacing: 6px;
+                        if App.self-banner != "": Banner {
+                            kind: "self";
+                            text: App.self-banner;
+                            action: Tr.t("sb_install_first");
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("self");
+                            }
+                        }
+                        if App.os-banner != "": Banner {
+                            kind: "os";
+                            text: App.os-banner;
+                            action: App.os-action;
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("os");
+                            }
+                        }
+                        if App.restart-banner != "": Banner {
+                            kind: "restart";
+                            text: App.restart-banner;
+                            action: Tr.t("restart_now");
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("restart");
+                            }
+                        }
+                        if App.health-banner != "": Banner {
+                            kind: "health";
+                            text: App.health-banner;
+                            action: Tr.t("hb_open");
+                            clicked => {
+                                App.banner("health");
+                            }
+                        }
+                        if App.repo-banner != "": Banner {
+                            kind: "repo";
+                            text: App.repo-banner;
+                            action: Tr.t("open_keyfix");
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("repo");
+                            }
+                        }
+                        if App.pause-banner != "": Banner {
+                            kind: "pause";
+                            text: App.pause-banner;
+                            action: Tr.t("resume");
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("pause");
+                            }
+                        }
+                        if App.kernel-banner != "": Banner {
+                            kind: "kernel";
+                            text: App.kernel-banner;
+                            action: Tr.t("open_kernel");
+                            enabled: !App.busy;
+                            clicked => {
+                                App.banner("kernel");
+                            }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            if App.page == "home": HomePage {}
+                            if App.page == "updates": UpdatesPage {}
+                            if App.page == "health": HealthPage {}
+                            if App.page == "maintenance": TilesPage {
+                                title: Tr.t("nav_maintenance");
+                                intro: Tr.t("maintenance_intro");
+                                tiles: [
+                                    { kind: "cleaner", text: Tr.t("tile_cleaner"), page: "cleaner", badge: 0 },
+                                    { kind: "kernel", text: Tr.t("tile_kernels"), page: "kernels", badge: 0 },
+                                    { kind: "history", text: Tr.t("history"), page: "history", badge: 0 },
+                                    { kind: "log", text: Tr.t("action_log"), page: "log", badge: 0 },
+                                ];
+                            }
+                            if App.page == "sources": TilesPage {
+                                title: Tr.t("nav_sources");
+                                intro: Tr.t("sources_intro");
+                                tiles: [
+                                    { kind: "key", text: Tr.t("tile_keyfix"), page: "keyfix", badge: 0 },
+                                    { kind: "sources", text: Tr.t("tile_addrepo"), page: "addrepo", badge: 0 },
+                                    { kind: "add", text: Tr.t("tile_addkey"), page: "addkey", badge: 0 },
+                                ];
+                            }
+                            if App.page == "settings": TilesPage {
+                                title: Tr.t("nav_settings");
+                                intro: Tr.t("settings_intro");
+                                tiles: [
+                                    { kind: "settings", text: Tr.t("tile_settings"), page: "prefs", badge: 0 },
+                                    { kind: "about", text: Tr.t("about"), page: "about", badge: 0 },
+                                ];
+                            }
+                            if App.page == "cleaner": CleanerPage {}
+                            if App.page == "kernels": KernelsPage {}
+                            if App.page == "keyfix": KeyFixPage {}
+                            if App.page == "addrepo": AddRepoPage {}
+                            if App.page == "addkey": AddKeyPage {}
+                            if App.page == "upgrade": UpgradeOsPage {}
+                            if App.page == "prefs": PrefsPage {}
+                            if App.page == "history": TextPage {
+                                title: Tr.t("history_title");
+                                text: App.history-text;
+                                back: "maintenance";
+                                history: true;
+                            }
+                            if App.page == "log": TextPage {
+                                title: Tr.t("log_title");
+                                text: App.log-text;
+                                back: "maintenance";
+                            }
+                            if App.page == "about": AboutPage {}
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    height: 22px;
+                    padding-left: 6px;
+                    padding-right: 4px;
+                    spacing: 10px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: App.busy ? App.progress-detail : App.page == "updates" ? App.selection-text : "";
+                        color: #374151;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if App.busy: Rectangle {
+                        width: 110px;
+                        height: 6px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 3px;
+                        background: #E5EDE8;
+                        clip: true;
+                        Rectangle {
+                            width: 36px;
+                            border-radius: 3px;
+                            background: #157A55;
+                            x: (parent.width - self.width) * (0.5 + 0.5 * sin(animation-tick() / 1.4ms * 1deg));
+                        }
+                    }
+                    Text {
+                        text: App.last-checked;
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // ---- message box over the window
+        if App.msg-visible: Rectangle {
+            background: #00000040;
+            TouchArea {}
+            Rectangle {
+                width: min(parent.width - 60px, 520px);
+                height: box.preferred-height;
+                background: #F6F8F7;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: #C8CECB;
+                drop-shadow-blur: 24px;
+                drop-shadow-color: #00000050;
+                box := VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+                    Text {
+                        text: App.msg-title;
+                        font-weight: 700;
+                        font-size: Theme.font-title;
+                        color: Theme.brand;
+                    }
+                    Text {
+                        text: App.msg-text;
+                        wrap: word-wrap;
+                        color: Theme.text;
+                        max-height: 360px;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        for button in App.msg-buttons: ActionButton {
+                            text: button.text;
+                            primary: button.primary;
+                            clicked => {
+                                App.msg-clicked(button.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

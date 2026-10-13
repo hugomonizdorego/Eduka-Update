@@ -1,0 +1,23 @@
+[package]
+name = "eus-gui"
+description = "Graphical update manager of Eduka-Update-System (Slint)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "eduka-update-system-gui"
+path = "src/main.rs"
+
+[dependencies]
+eus-core = { path = "../eus-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+libc.workspace = true
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
+png = "0.18"
+
+[build-dependencies]
+slint-build = "1.18"

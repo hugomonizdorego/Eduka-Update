@@ -390,7 +390,8 @@ calculate_updates() {
                 if (pkg != "" && !(pkg in seen)) {
                     seen[pkg] = 1
                     gsub(/\t/, " ", desc)
-                    printf "%s\t%s\t%s\t%s\t%s\t%s\n", pkg, size + 0, prio, sect, src, desc
+                    # \037 (unit separator): unlike tabs, read never merges empty fields.
+                    printf "%s\037%s\037%s\037%s\037%s\037%s\n", pkg, size + 0, prio, sect, src, desc
                 }
                 pkg = size = prio = sect = desc = src = ""
             }
@@ -401,7 +402,7 @@ calculate_updates() {
             /^Section: / { sect = substr($0, 10) }
             /^Description(-[A-Za-z_@.-]+)?: / { if (desc == "") { sub(/^[^:]*: /, ""); desc = $0 } }
             END { flush() }' >"$metadata_file"
-        while IFS=$'\t' read -r key size priority section source description; do
+        while IFS=$'\037' read -r key size priority section source description; do
             meta_source["$key"]="${source:-$key}"
             meta_size["$key"]="$size"
             meta_priority["$key"]="$priority"
