@@ -165,6 +165,44 @@ if shutil.which("gpg"):
         pass
     shutil.rmtree(home, ignore_errors=True)
 
+# ---- continuous stable (Edukasaun OS policy) ----
+for name in ("sources.list.d/vendor-a.list", "sources.list.d/vendor-b.sources", "sources.list.d/vendor-c.list",
+             "sources.list.d/vendor-d.list", "sources.list.d/vendor-e.list"):
+    (apt / name).unlink(missing_ok=True)
+(apt / "sources.list").write_text(
+    f"deb {base}/debian trixie main contrib\n"
+    f"deb {base}/debian trixie-updates main\n"
+    f"deb {base}/debian-security trixie-security main\n"
+    f"deb {base}/vendor-a trixie main\n")
+(lists / f"{host}_debian_dists_trixie_InRelease").write_text(
+    "Origin: Debian\nLabel: Debian\nSuite: stable\nVersion: 13.1\nCodename: trixie\n")
+(lists / f"{host}_debian_dists_trixie-updates_InRelease").write_text(
+    "Origin: Debian\nLabel: Debian\nSuite: stable-updates\nCodename: trixie-updates\n")
+(lists / f"{host}_debian-security_dists_trixie-security_InRelease").write_text(
+    "Origin: Debian\nLabel: Debian-Security\nSuite: stable-security\nCodename: trixie-security\n")
+(ROOT / "etc/debian_version").write_text("13.1\n")
+plan = {(r["suite"], r["new_suite"]) for r in tool.continuous_stable_plan()}
+assert plan == {("trixie", "stable"), ("trixie-updates", "stable-updates"),
+                ("trixie-security", "stable-security")}, plan          # vendor-a is untouched
+result = tool.apply_continuous_stable()
+main = (apt / "sources.list").read_text()
+assert "debian stable main contrib" in main and "debian stable-updates main" in main, main
+assert "debian-security stable-security main" in main and "vendor-a trixie main" in main, main
+assert Path(result["backup"]).is_dir()
+assert not tool.continuous_stable_plan()                            # idempotent
+# Lists for "stable" still describe trixie: nothing to do.
+(lists / f"{host}_debian_dists_stable_InRelease").write_text(
+    "Origin: Debian\nLabel: Debian\nSuite: stable\nVersion: 13.2\nCodename: trixie\n")
+state = tool.check_continuous_release()
+assert state["mode"] == "continuous" and state["available"] == 0, state
+# Debian 14 is released: "stable" now carries forky -> one major system update.
+(lists / f"{host}_debian_dists_stable_InRelease").write_text(
+    "Origin: Debian\nLabel: Debian\nSuite: stable\nVersion: 14.0\nCodename: forky\n")
+state = tool.check_os_upgrade()
+assert state["available"] == 1 and state["mode"] == "continuous", state
+assert state["target_codename"] == "forky" and state["current_codename"] == "trixie", state
+assert "mode=continuous" in (ROOT / "var/lib/eus/os-upgrade").read_text()
+
 server.shutdown()
 shutil.rmtree(ROOT, ignore_errors=True)
 print('{"smart_tests": "passed"}')

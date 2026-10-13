@@ -91,6 +91,7 @@ install_file 0644 data/systemd/eus-refresh.timer /etc/systemd/system/eus-refresh
 install_file 0644 data/systemd/eus-sources.path /etc/systemd/system/eus-sources.path
 install_file 0644 data/systemd/eus-sources-refresh.service /etc/systemd/system/eus-sources-refresh.service
 
+install_file 0644 data/apt/52eduka-update-system /etc/apt/apt.conf.d/52eduka-update-system
 install_if_missing 0644 config/eus.conf /etc/eus/eus.conf
 install_if_missing 0644 config/interval-hours /etc/eus/interval-hours
 install -D -m 0644 "$PROJECT_DIR/VERSION" "$(target /etc/eus/version.raw)"
@@ -116,6 +117,9 @@ if [[ -z "$DESTDIR" ]]; then
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && \
         gtk-update-icon-cache -f -q /usr/share/icons/hicolor >/dev/null 2>&1 || true
+    # Edukasaun OS release policy: Debian repositories follow "stable".
+    /usr/bin/python3 -I /usr/local/libexec/eduka-update-system-tool continuous-stable --apply \
+        >/dev/null 2>&1 || true
     if ((ENABLE_SERVICES)) && command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload
         # In a chroot such as Cubic, systemctl enables the units and skips starting them.

@@ -95,3 +95,22 @@ runs `clean-system autoremove configs apt-cache` unless `AUTO_CLEAN=0` in
 `/etc/eus/eus.conf`. Other options there: `AUTO_UPGRADE=off|security|all`
 and `TIMESHIFT_SNAPSHOT=0|1`; ignored updates are listed in
 `/etc/eus/ignored-updates`.
+
+## Continuous stable and major updates
+
+`/etc/apt/apt.conf.d/52eduka-update-system` sets
+`Acquire::AllowReleaseInfoChange::{Codename,Version,Suite}`. `os-check`
+compares the `Version` of the cached `stable` Release file with
+`/etc/debian_version`; a newer major version writes `available=1` and
+`mode=continuous` to `/var/lib/eus/os-upgrade`. The GUI then groups all APT
+updates into one "major" row and runs the backend action `major-upgrade`.
+`continuous-stable --apply` (postinst, `install.sh`, System Health) rewrites
+codename suites of Debian entries whose Release file says `Suite: stable`.
+
+## System Health
+
+`eduka-update-system-tool health [--quick] [--save]` returns findings and
+recommendations; the backend stores them in `/var/lib/eus/health.json` after
+each refresh. Fixes run as root through `health-fix` with a fixed list of
+identifiers (`dpkg-configure`, `fix-broken`, `reinstall-damaged`,
+`continuous-stable`, `enable-firmware`, `install-*`).

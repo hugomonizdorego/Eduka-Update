@@ -1,0 +1,13 @@
+// Installed by Eduka-Update-System.
+//
+// Edukasaun OS follows Debian "stable" without a release codename and is
+// updated continuously. When Debian publishes a new stable release (for
+// example trixie -> forky), the archive changes its Codename and Version.
+// APT normally stops updating until someone confirms that change; these
+// options accept it, so package lists keep updating. Eduka-Update-System
+// then shows the new release as one "major system update" and installs it
+// safely (snapshot, minimal upgrade, full upgrade, clean-up). Origin and
+// Label changes are still refused.
+Acquire::AllowReleaseInfoChange::Codename "true";
+Acquire::AllowReleaseInfoChange::Version "true";
+Acquire::AllowReleaseInfoChange::Suite "true";

@@ -5,7 +5,7 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.15'
+VERSION='0.16'
 GUI='/usr/local/libexec/eduka-update-system-gui'
 PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
@@ -23,6 +23,13 @@ OPEN_UPGRADE='Open Upgrade OS'
 KEY_TITLE='A repository needs a GPG key'
 KEY_BODY='%s repository signing key(s) are missing, so those repositories are ignored. Key Fix can find and install them automatically.'
 OPEN_KEYFIX='Open Key Fix'
+MAJOR_TITLE='Major system update available'
+MAJOR_BODY='Debian %s "%s" is the new stable base of %s. Open the Update Manager to install it safely.'
+OPEN_UPDATES='Open Update Manager'
+HEALTH_TITLE='System problem found'
+HEALTH_BODY='%s. The Update Manager can repair it.'
+OPEN_HEALTH='Open System Health'
+HEALTH_FILE='/var/lib/eus/health.json'
 CONFIG_FILE='/etc/eus/eus.conf'
 VERSION_FILE='/etc/eus/version'
 CHECK_INTERVAL_SECONDS=60
@@ -326,7 +333,7 @@ Usage: eduka-update-system [OPTION]
 
 Graphical interface:
   --ui                         open the update manager (default)
-  --open kernel|key-fix|add-key|add-repo|upgrade-os|cleaner|settings
+  --open updates|health|cleaner|kernel|key-fix|add-key|add-repo|settings
                                open the manager directly on one dialog
 
 Terminal:
@@ -344,6 +351,9 @@ Terminal:
                                add a repository; its GPG key is found and
                                installed automatically
   --check-os                   check for a new Debian base release
+  --health                     check the system for damage and show fixes
+  --repair                     apply every recommended System Health fix
+  --major-upgrade              install a pending major system update
   --clean                      clean the system (APT cache, unneeded
                                packages, leftover configs, old logs)
   --upgrade-os                 show the repository plan and upgrade the OS
@@ -574,7 +584,7 @@ notify_with_action() {
 }
 
 read_os_upgrade() {
-    OS_AVAILABLE=0; OS_NAME='Edukasaun OS'; OS_TARGET=''; OS_TARGET_VERSION=''
+    OS_AVAILABLE=0; OS_NAME='Edukasaun OS'; OS_TARGET=''; OS_TARGET_VERSION=''; OS_MODE=''
     [[ -r "$OS_UPGRADE_FILE" ]] || return 1
     local key value
     while IFS='=' read -r key value; do
@@ -583,6 +593,7 @@ read_os_upgrade() {
             os_name) OS_NAME="$value" ;;
             target_codename) OS_TARGET="$value" ;;
             target_version) OS_TARGET_VERSION="$value" ;;
+            mode) OS_MODE="$value" ;;
         esac
     done <"$OS_UPGRADE_FILE"
     [[ "$OS_AVAILABLE" -eq 1 && -n "$OS_TARGET" ]]
@@ -599,8 +610,39 @@ send_os_upgrade_notification() {
     mkdir -p "$cache_dir"
     [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$OS_TARGET" ]] && return 0
     printf '%s\n' "$OS_TARGET" >"$stamp_file"
-    notify_with_action "$OPEN_UPGRADE" upgrade-os "$OS_UPGRADE_TITLE" \
-        "$(printf "$OS_UPGRADE_BODY" "$OS_NAME" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET")" normal
+    if [[ "$OS_MODE" == continuous ]]; then
+        notify_with_action "$OPEN_UPDATES" updates "$MAJOR_TITLE" \
+            "$(printf "$MAJOR_BODY" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET" "$OS_NAME")" normal
+    else
+        notify_with_action "$OPEN_UPGRADE" upgrade-os "$OS_UPGRADE_TITLE" \
+            "$(printf "$OS_UPGRADE_BODY" "$OS_NAME" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET")" normal
+    fi
+}
+
+send_health_notification() {
+    # Critical or warning findings of the last background health check,
+    # announced once per distinct set of problems.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    [[ -r "$HEALTH_FILE" ]] || return 0
+    eus_gui_is_running && return 0
+    local summary cache_dir stamp_file hash
+    summary="$("$PYTHON" -I -c 'import json, sys
+data = json.load(open(sys.argv[1]))
+items = [f for f in data.get("findings", []) if f.get("severity") in ("critical", "warning")]
+print("|".join(sorted(f["id"] for f in items)))
+print(items[0]["title"] if items else "")' "$HEALTH_FILE" 2>/dev/null)" || return 0
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/health-notified"
+    mkdir -p "$cache_dir"
+    if [[ -z "$(head -n1 <<<"$summary")" ]]; then
+        rm -f -- "$stamp_file"
+        return 0
+    fi
+    hash="$(head -n1 <<<"$summary")"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$hash" ]] && return 0
+    printf '%s\n' "$hash" >"$stamp_file"
+    notify_with_action "$OPEN_HEALTH" health "$HEALTH_TITLE" \
+        "$(printf "$HEALTH_BODY" "$(sed -n 2p <<<"$summary")")" critical
 }
 
 send_missing_key_notification() {
@@ -660,6 +702,7 @@ watch_updates() {
     while true; do
         send_os_upgrade_notification
         send_missing_key_notification
+        send_health_notification
         send_update_notification
         send_restart_notification
         sleep "$CHECK_INTERVAL_SECONDS"
@@ -675,7 +718,7 @@ case "$command_name" in
     --ui) launch_gui "$@" ;;
     --open)
         case "${1:-}" in
-            kernel|key-fix|add-key|add-repo|upgrade-os|settings|cleaner) launch_gui --open "$1" ;;
+            kernel|key-fix|add-key|add-repo|upgrade-os|settings|cleaner|health|updates) launch_gui --open "$1" ;;
             *) usage >&2; exit 64 ;;
         esac
         ;;
@@ -706,6 +749,30 @@ case "$command_name" in
         fi
         ;;
     --upgrade-os) terminal_os_upgrade ;;
+    --health)
+        "$PYTHON" -I "$TOOL" health | "$PYTHON" -I -c 'import json, sys
+data = json.load(sys.stdin)
+for f in data["findings"] + data["recommendations"]:
+    fix = " -> fix: " + f["fix"] if f["fix"] else ""
+    print("[%-9s] %s%s" % (f["severity"], f["title"], fix))
+    if f["detail"]:
+        print("            " + f["detail"])
+if not data["findings"]:
+    print("No problem found.")'
+        ;;
+    --repair)
+        mapfile -t fixes < <("$PYTHON" -I "$TOOL" health | "$PYTHON" -I -c 'import json, sys
+data = json.load(sys.stdin)
+for f in data["findings"]:
+    if f["fix"]:
+        print(f["fix"])')
+        if ((${#fixes[@]} == 0)); then
+            printf 'No repair is needed.\n'
+        else
+            invoke_root_terminal health-fix "${fixes[@]}"
+        fi
+        ;;
+    --major-upgrade) invoke_root_terminal major-upgrade ;;
     --clean)
         "$PYTHON" -I "$TOOL" scan-clean --scope system | "$PYTHON" -c 'import json, sys
 for item in json.load(sys.stdin):

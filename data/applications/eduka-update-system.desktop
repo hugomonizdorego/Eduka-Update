@@ -22,7 +22,11 @@ Keywords=update;upgrade;security;APT;Flatpak;EUS;Edukasaun;cleaner;kernel;clean;
 StartupNotify=true
 StartupWMClass=Eduka-Update-System
 X-LXQt-Need-Tray=false
-Actions=Cleaner;Kernels;
+Actions=Health;Cleaner;Kernels;
+
+[Desktop Action Health]
+Name=System Health
+Exec=/usr/local/bin/eduka-update-system --open health
 
 [Desktop Action Cleaner]
 Name=System Cleaner

@@ -155,5 +155,13 @@ if old_home is not None:
 assert tool.ROTATED_LOG_RE.match("syslog.2.gz") and tool.ROTATED_LOG_RE.match("kern.log.1")
 assert not tool.ROTATED_LOG_RE.match("syslog")
 
+# System Health: dpkg --verify output.
+verify = ("??5?????? c /etc/bash.bashrc\n"
+          "missing     /usr/share/doc/bash/NEWS.gz\n"
+          "??5??????   /usr/bin/sudo\n"
+          "missing     /usr/lib/x86_64-linux-gnu/libfoo.so.1\n")
+assert tool.damaged_paths(verify) == ["/usr/bin/sudo", "/usr/lib/x86_64-linux-gnu/libfoo.so.1"]
+assert tool.HEALTH_FIXES >= {"dpkg-configure", "fix-broken", "reinstall-damaged", "continuous-stable"}
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print(json.dumps({"tool_tests": "passed"}))

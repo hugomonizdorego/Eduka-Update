@@ -45,7 +45,7 @@ sed -e "s/@VERSION@/$VERSION/" -e "s/@INSTALLED_SIZE@/$installed_size/" \
 for script in postinst prerm postrm; do
     install -m 0755 "$PROJECT_DIR/packaging/debian/$script" "$ROOT/DEBIAN/$script"
 done
-printf '/etc/eus/eus.conf\n' >"$ROOT/DEBIAN/conffiles"
+printf '/etc/eus/eus.conf\n/etc/apt/apt.conf.d/52eduka-update-system\n' >"$ROOT/DEBIAN/conffiles"
 (cd "$ROOT" && find . -path ./DEBIAN -prune -o -type f -print0 | sort -z | \
     xargs -0 md5sum | sed 's|  \./|  |') >"$ROOT/DEBIAN/md5sums"
 chmod 0644 "$ROOT/DEBIAN/control" "$ROOT/DEBIAN/conffiles" "$ROOT/DEBIAN/md5sums"

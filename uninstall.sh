@@ -50,6 +50,7 @@ files=(
     /usr/local/libexec/eduka-update-system-gui
     /usr/local/libexec/eduka-update-system-root
     /usr/local/libexec/eduka-update-system-tool
+    /etc/apt/apt.conf.d/52eduka-update-system
     /usr/lib/EUS-ICONS/eus_panel_indicator.py
     /usr/lib/EUS-ICONS/eus-i18n.json
     /usr/lib/EUS-ICONS/eus-icons.json
@@ -84,6 +85,8 @@ if ((PURGE)); then
         /etc/eus/pause
         /var/lib/eus/apt-update.log
         /var/lib/eus/repair-report.json
+        /var/lib/eus/health.json
+        /var/lib/eus/os-upgrade
         /var/lib/eus/updates.tsv
         /var/lib/eus/status
         /var/lib/eus/last-error

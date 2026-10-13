@@ -23,6 +23,12 @@ if [ "$1" = configure ]; then
         [ -L "$link" ] && [ ! -e "$link" ] && rm -f "$link"
     done
 
+    # Edukasaun OS release policy: Debian repositories that name the current
+    # stable release by codename are switched to "stable" (backups in
+    # /var/backups/eus). Third-party repositories are never changed.
+    /usr/bin/python3 -I /usr/local/libexec/eduka-update-system-tool continuous-stable --apply \
+        >>/var/log/eus/eus.log 2>&1 || true
+
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload >/dev/null 2>&1 || true
     fi

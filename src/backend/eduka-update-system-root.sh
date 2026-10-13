@@ -1,5 +1,5 @@
 #!/bin/bash
-# Privileged helper for Eduka-Update-System 0.15. Do not launch directly.
+# Privileged helper for Eduka-Update-System 0.16. Do not launch directly.
 # It is the only program PolicyKit allows EUS to run as root.
 
 set -u
@@ -138,6 +138,8 @@ P_OS_UPGRADE='Upgrading the operating system (this can take a long time)...'
 P_SNAPSHOT='Creating a Timeshift snapshot before installing...'
 P_CLEAN='Cleaning up: unneeded packages, leftover configuration and package cache...'
 P_AUTO='Installing updates automatically...'
+P_MAJOR='Installing the major system update (new Debian stable release)...'
+P_HEALTH='Checking the system for problems...'
 P_OS_SPACE='Not enough free disk space for the OS upgrade (at least 5 GB is needed in / and /var).'
 
 progress() {
@@ -555,9 +557,65 @@ refresh_lists() {
     apt_update_or_fail
     progress 68 "$P_CALCULATE"
     calculate_updates
-    progress 96 "$P_OS_CHECK"
+    progress 94 "$P_OS_CHECK"
     os_check
+    progress 97 "$P_HEALTH"
+    health_check
     progress 100 "$P_DONE"
+}
+
+health_check() {
+    # Stored for the notifier and the GUI; never fails the caller.
+    [[ -x "$PYTHON" && -r "$TOOL" ]] || return 0
+    timeout 300 "$PYTHON" -I "$TOOL" health --save >/dev/null 2>>"$LOG_FILE" || true
+}
+
+major_update_pending() {
+    # A new Debian stable arrived through the codename-free "stable" suite.
+    [[ -r "$STATE_DIR/os-upgrade" ]] && grep -qx 'available=1' "$STATE_DIR/os-upgrade" && \
+        grep -qx 'mode=continuous' "$STATE_DIR/os-upgrade"
+}
+
+major_upgrade() {
+    # The Debian release-upgrade procedure, without touching the sources:
+    # Edukasaun OS already follows "stable".
+    trap '' HUP PIPE
+    log_header 'Major system update (new Debian stable) requested'
+    progress 1 "$P_OS_CHECK"
+    if (( $(disk_free_kb /) < 5242880 || $(disk_free_kb /var) < 5242880 )); then
+        fail "$P_OS_SPACE"
+    fi
+    timeshift_snapshot
+    progress 3 "$P_REFRESH"
+    apt_update_or_fail
+    progress 20 "$P_MAJOR"
+    UPGRADE_RANGE='20 15 35 15' apt_upgrade_command upgrade --without-new-pkgs -y || \
+        fail 'The minimal upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run the major update again.'
+    UPGRADE_RANGE='50 20 70 18' apt_upgrade_command full-upgrade -y || \
+        fail 'The full upgrade step failed. Fix the problem shown in /var/log/eus/eus.log and run the major update again.'
+    progress 89 "$P_CALCULATE"
+    calculate_updates
+    post_clean
+    os_check
+    health_check
+    log_header 'Major system update finished'
+    progress 100 "$P_DONE"
+}
+
+health_fix() {
+    local item
+    ((${#EXTRA_ARGS[@]} > 0 && ${#EXTRA_ARGS[@]} <= 12)) || fail 'Nothing was selected to fix.'
+    for item in "${EXTRA_ARGS[@]}"; do
+        [[ "$item" =~ ^[a-z][a-z0-9-]{1,40}$ ]] || fail "Invalid fix: $item"
+    done
+    log_header "System Health fixes: ${EXTRA_ARGS[*]}"
+    progress 2 "$P_HEALTH"
+    run_tool health-fix "${EXTRA_ARGS[@]}"
+    if grep -q '"refresh": true' "$STATE_DIR/repair-report.json" 2>/dev/null; then
+        apt_update_command || true
+    fi
+    calculate_updates
+    os_check
 }
 
 apt_upgrade_command() {
@@ -578,6 +636,10 @@ upgrade_all_apt() {
     apt_update_or_fail
     timeshift_snapshot
     progress 26 "$P_UPGRADE"
+    if major_update_pending; then
+        UPGRADE_RANGE='26 15 41 15' apt_upgrade_command upgrade --without-new-pkgs -y || \
+            fail 'The minimal upgrade step failed. See /var/log/eus/eus.log.'
+    fi
     full_upgrade_respecting_ignores || \
         fail 'The system upgrade did not finish successfully. See /var/log/eus/eus.log.'
     progress 90 "$P_CALCULATE"
@@ -808,6 +870,11 @@ automatic_upgrade() {
     local -a packages=()
     local inhibitor=''
     case "${AUTO_UPGRADE:-off}" in security|all) ;; *) return 0 ;; esac
+    if major_update_pending; then
+        # A new Debian release is never installed unattended.
+        log_header 'Automatic upgrade skipped: a major system update needs confirmation'
+        return 0
+    fi
     if on_battery_power; then
         log_header 'Automatic upgrade skipped: running on battery'
         return 0
@@ -1125,7 +1192,7 @@ case "$ACTION" in
     refresh|auto-refresh|sources-refresh|upgrade-apt|install-apt|install-flatpak-system) ;;
     set-interval|set-schedule|pause|clear-history|reboot) ;;
     fix-keys|fix-duplicates|add-key|add-repo|kernel-install|kernel-remove) ;;
-    os-check|os-upgrade|clean|ignore|set-option) ;;
+    os-check|os-upgrade|clean|ignore|set-option|major-upgrade|health-fix|health-check) ;;
     *) echo 'Invalid EUS privileged action.' >&2; exit 64 ;;
 esac
 
@@ -1152,6 +1219,9 @@ case "$ACTION" in
     os-check) progress 10 "$P_OS_CHECK"; os_check; progress 100 "$P_DONE" ;;
     os-upgrade) os_upgrade ;;
     clean) clean_system ;;
+    major-upgrade) major_upgrade ;;
+    health-fix) health_fix ;;
+    health-check) progress 10 "$P_HEALTH"; health_check; progress 100 "$P_DONE" ;;
     ignore) ignore_update ;;
     set-option) set_option ;;
     kernel-install) kernel_install ;;

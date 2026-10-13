@@ -3,6 +3,31 @@
 All notable changes to Eduka-Update-System are documented here. The project
 uses a single public version number without a build suffix.
 
+## 0.16 — 2026-10-13
+
+### Changed
+
+- Edukasaun OS release policy: Debian repositories follow `stable` without
+  a codename. EUS installs an APT configuration that accepts the Codename and
+  Version change of a new Debian stable release, and moves Debian
+  repositories that name the current stable release to `stable` (backups
+  kept; third-party repositories untouched).
+- A new Debian stable release is presented as one major system update and
+  installed with the release-upgrade sequence; automatic updates never
+  install it.
+- Launcher-style window: category sidebar with a pointer to the panel,
+  rounded panel with large flat icons, badges; the separate ☰ menu is gone
+  (selection actions are in the list's right-click menu).
+
+### Added
+
+- System Health: detection of interrupted installations, broken
+  dependencies, damaged or missing core files, low disk space, failed
+  services, repository and kernel problems, with one-click repairs, plus
+  recommendations (microcode, Timeshift, zram, fwupd, non-free-firmware).
+  Checked after every scheduled refresh; notifications for new problems;
+  `--health`, `--repair`, `--major-upgrade`, `--open health`.
+
 ## 0.15 — 2026-10-02
 
 ### Changed

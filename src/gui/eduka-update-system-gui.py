@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Qt 6 interface for Eduka-Update-System 0.15."""
+"""Qt 6 interface for Eduka-Update-System 0.16."""
 
 from __future__ import annotations
 
@@ -40,11 +40,12 @@ APT_UPDATE_LOG = Path(os.environ.get("EUS_APT_UPDATE_LOG", "/var/lib/eus/apt-upd
 REPORT_FILE = Path(os.environ.get("EUS_REPORT_FILE", "/var/lib/eus/repair-report.json"))
 CONFIG_FILE = Path(os.environ.get("EUS_CONFIG_FILE", "/etc/eus/eus.conf"))
 IGNORE_FILE = Path(os.environ.get("EUS_IGNORE_FILE", "/etc/eus/ignored-updates"))
+HEALTH_FILE = Path(os.environ.get("EUS_HEALTH_FILE", "/var/lib/eus/health.json"))
 OS_UPGRADE_FILE = Path(os.environ.get("EUS_OS_UPGRADE_FILE", "/var/lib/eus/os-upgrade"))
 REPOSITORIES_FIXTURE = os.environ.get("EUS_REPOSITORIES_FIXTURE", "")
 OS_PLAN_FIXTURE = os.environ.get("EUS_OS_PLAN_FIXTURE", "")
 PANEL_STATUS = "/usr/local/bin/eus-panel-status"
-EUS_VERSION = "0.15"
+EUS_VERSION = "0.16"
 EUS_APP_ICON = "/usr/share/icons/hicolor/48x48/apps/eduka-update-system.png"
 EUS_ICON_DIR = "/usr/lib/EUS-ICONS"
 EUS_ICON_IDLE = f"{EUS_ICON_DIR}/eus-update-idle.png"
@@ -148,13 +149,14 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
 
 
 try:
-    from PyQt6.QtCore import (QFileSystemWatcher, QPoint, QProcess, QProcessEnvironment, QSize, Qt,
+    from PyQt6.QtCore import (QFileSystemWatcher, QProcess, QProcessEnvironment, QRectF, QSize, Qt,
                               QTime, QTimer, pyqtSignal)
-    from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QKeySequence, QShortcut
+    from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QKeySequence, QShortcut
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
     from PyQt6.QtWidgets import (
         QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
-        QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+        QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGraphicsDropShadowEffect, QGridLayout, QGroupBox,
+        QHBoxLayout, QStackedWidget,
         QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
         QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QTimeEdit,
         QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -746,6 +748,35 @@ MESSAGES_015 = {
         "st_timeshift": "Create a Timeshift snapshot before installing updates",
         "st_timeshift_missing": "Create a Timeshift snapshot first (Timeshift is not installed)",
         "st_ignored": "Ignored updates", "st_ignored_none": "No update is ignored.", "st_unignore": "Stop ignoring",
+        "nav_home": "Home", "nav_updates": "Updates", "nav_health": "System Health",
+        "nav_maintenance": "Maintenance", "nav_sources": "Software Sources", "nav_settings": "Settings",
+        "tile_updates": "Install Updates", "tile_check": "Check for Updates", "tile_major": "Major System Update",
+        "tile_cleaner": "System Cleaner", "tile_kernels": "Kernels", "tile_settings": "Update Settings",
+        "tile_keyfix": "Repositories & Keys", "tile_addrepo": "Add Repository", "tile_addkey": "Add GPG Key",
+        "maintenance_intro": "Keep the system lean: free disk space, manage kernels and review what EUS did.",
+        "sources_intro": "Repositories and their signing keys. Edukasaun OS follows Debian stable continuously.",
+        "settings_intro": "Schedule, automatic updates, clean-up and notifications.",
+        "home_updates": "{count} updates are available", "home_ok": "Your system is up to date",
+        "home_major": "A major system update is available",
+        "home_detail_security": "{count} of them fix security problems. Install them soon.",
+        "banner_major": "Major system update: Debian {version} \"{codename}\" is the new stable base.",
+        "major_name": "Major system update — Debian {version} \"{codename}\"",
+        "major_description": "The new Debian stable release ({count} packages). Edukasaun OS follows stable continuously, so this is installed as one large system update: snapshot, minimal upgrade, full upgrade, clean-up. A restart is required afterwards.",
+        "major_title": "Major system update",
+        "major_confirm": "Install the major system update to Debian {version} \"{codename}\"?\n\n{count} packages, {size} to download. This can take a long time; keep the computer connected to power and network. A restart is required at the end.",
+        "type_major": "Major",
+        "fix_major": "Moves Edukasaun OS to the new Debian stable release.",
+        "risk_major": "Older releases stop receiving security updates about a year later.",
+        "recommend_major": "Install when you have time; save your work first.",
+        "hp_scan": "Scan again", "hp_fix": "Repair selected", "hp_scanning": "Checking the system…",
+        "hp_findings": "Findings", "hp_recommendations": "Recommended for this computer",
+        "hp_ok": "No problem found. The system is healthy.", "hp_open": "double-click to open",
+        "hp_problems": "{count} problem(s) need attention · checked {time}",
+        "hp_good": "The system is healthy · checked {time}",
+        "hp_confirm": "Apply {count} selected repair(s) and recommendation(s)? Administrator rights are needed.",
+        "hp_fixed": "The selected repairs were applied.",
+        "sev_critical": "Repair needed", "sev_warning": "Attention", "sev_info": "Info", "sev_recommend": "Recommended",
+        "hb_text": "System Health: {title}.", "hb_open": "Review",
 }
 for _lang in MESSAGES:
     for _key, _value in MESSAGES_015.items():
@@ -755,6 +786,7 @@ for _lang in MESSAGES:
 CATEGORY_COLORS = {
     "critical": ("#D92D20", "#FFF1F0", "#7A271A"),
     "kernel": ("#7C3AED", "#F5F3FF", "#4C1D95"),
+    "major": ("#553C9A", "#F4F1FF", "#322659"),
     "medium": ("#B7791F", "#FFF8E1", "#7A4D00"),
     "normal": ("#169B62", "#ECFDF3", "#075E3B"),
     "flatpak": ("#1677D2", "#EFF8FF", "#0B4A82"),
@@ -2349,7 +2381,7 @@ class UpgradeOSDialog(BackgroundDialog):
 
 CATEGORY_LABELS = {"critical": "Security", "kernel": "Kernel", "medium": "Important",
                    "normal": "Regular", "flatpak": "Flatpak"}
-CATEGORY_RANK = {"critical": 0, "kernel": 1, "medium": 2, "normal": 3, "flatpak": 4}
+CATEGORY_RANK = {"major": -1, "critical": 0, "kernel": 1, "medium": 2, "normal": 3, "flatpak": 4}
 SELF_PACKAGE = "eduka-update-system"
 
 
@@ -2561,6 +2593,223 @@ class CleanerDialog(BackgroundDialog):
         self.scan()
 
 
+ICON_COLORS = {
+    "home": "#2F855A", "updates": "#1F7A55", "refresh": "#2B6CB0", "health": "#C05621", "cleaner": "#2C7A7B",
+    "kernel": "#6B46C1", "sources": "#975A16", "key": "#B7791F", "add": "#2F855A", "major": "#553C9A",
+    "history": "#4A5568", "settings": "#4A5568", "log": "#718096", "about": "#2B6CB0", "restart": "#C53030",
+    "maintenance": "#2C7A7B",
+}
+
+
+def paint_icon(kind: str, size: int = 56):
+    """Flat icon with a soft depth cue: rounded tile, gentle vertical
+    gradient, thin top highlight and a faint shadow, white symbol."""
+    from PyQt6.QtGui import QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+    from PyQt6.QtCore import QPointF, QRectF
+    scale = 2
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(scale, scale)
+    s = float(size)
+    base = QColor(ICON_COLORS.get(kind, "#2F855A"))
+    tile = QRectF(s * 0.06, s * 0.05, s * 0.88, s * 0.86)
+    radius = s * 0.2
+    # faint shadow
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(0, 0, 0, 34))
+    p.drawRoundedRect(tile.translated(0, s * 0.035), radius, radius)
+    gradient = QLinearGradient(tile.topLeft(), tile.bottomLeft())
+    gradient.setColorAt(0.0, base.lighter(128))
+    gradient.setColorAt(1.0, base)
+    p.setBrush(gradient)
+    p.drawRoundedRect(tile, radius, radius)
+    p.setPen(QPen(QColor(255, 255, 255, 70), max(1.0, s / 40)))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawRoundedRect(tile.adjusted(1, 1, -1, -1), radius - 1, radius - 1)
+
+    pen = QPen(QColor("#FFFFFF"), s * 0.075)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    c = tile.center()
+    u = s * 0.25          # symbol unit
+
+    def pt(x: float, y: float) -> "QPointF":
+        return QPointF(c.x() + x * u, c.y() + y * u)
+
+    if kind == "home":
+        p.drawPolyline(QPolygonF([pt(-1.15, 0.05), pt(0, -1.0), pt(1.15, 0.05)]))
+        p.drawPolyline(QPolygonF([pt(-0.8, -0.2), pt(-0.8, 0.95), pt(0.8, 0.95), pt(0.8, -0.2)]))
+    elif kind in {"updates", "major"}:
+        if kind == "updates":
+            p.drawLine(pt(0, -1.0), pt(0, 0.35))
+            p.drawPolyline(QPolygonF([pt(-0.55, -0.15), pt(0, 0.4), pt(0.55, -0.15)]))
+        else:
+            p.drawLine(pt(0, 0.35), pt(0, -1.0))
+            p.drawPolyline(QPolygonF([pt(-0.55, -0.45), pt(0, -1.0), pt(0.55, -0.45)]))
+        p.drawPolyline(QPolygonF([pt(-1.0, 0.35), pt(-1.0, 0.95), pt(1.0, 0.95), pt(1.0, 0.35)]))
+    elif kind == "refresh":
+        rect = QRectF(pt(-0.9, -0.9), pt(0.9, 0.9))
+        p.drawArc(rect, 40 * 16, 280 * 16)
+        p.drawPolyline(QPolygonF([pt(0.25, -0.95), pt(0.75, -0.6), pt(0.85, -1.15)]))
+    elif kind == "health":
+        path = QPainterPath(pt(0, -1.05))
+        path.cubicTo(pt(0.55, -0.75), pt(0.95, -0.85), pt(0.95, -0.85))
+        path.lineTo(pt(0.95, 0.0))
+        path.cubicTo(pt(0.95, 0.6), pt(0.4, 0.9), pt(0, 1.1))
+        path.cubicTo(pt(-0.4, 0.9), pt(-0.95, 0.6), pt(-0.95, 0.0))
+        path.lineTo(pt(-0.95, -0.85))
+        path.cubicTo(pt(-0.95, -0.85), pt(-0.55, -0.75), pt(0, -1.05))
+        p.drawPath(path)
+        p.drawPolyline(QPolygonF([pt(-0.42, 0.02), pt(-0.08, 0.38), pt(0.48, -0.32)]))
+    elif kind in {"cleaner", "maintenance"}:
+        p.drawLine(pt(0.95, -1.0), pt(0.05, -0.1))
+        path = QPainterPath(pt(-0.05, -0.3))
+        path.lineTo(pt(0.35, 0.1))
+        path.lineTo(pt(-0.35, 1.0))
+        path.lineTo(pt(-1.05, 0.3))
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(pt(-0.5, 0.65), pt(-0.15, 0.3))
+    elif kind == "kernel":
+        p.drawRoundedRect(QRectF(pt(-0.65, -0.65), pt(0.65, 0.65)), u * 0.15, u * 0.15)
+        for offset in (-0.35, 0.0, 0.35):
+            p.drawLine(pt(offset, -0.65), pt(offset, -1.0))
+            p.drawLine(pt(offset, 0.65), pt(offset, 1.0))
+            p.drawLine(pt(-0.65, offset), pt(-1.0, offset))
+            p.drawLine(pt(0.65, offset), pt(1.0, offset))
+    elif kind == "sources":
+        for top in (-0.95, -0.15, 0.65):
+            p.drawRoundedRect(QRectF(pt(-1.0, top), pt(1.0, top + 0.45)), u * 0.12, u * 0.12)
+    elif kind == "key":
+        p.drawEllipse(QRectF(pt(-1.05, -0.45), pt(-0.15, 0.45)))
+        p.drawLine(pt(-0.15, 0), pt(1.0, 0))
+        p.drawLine(pt(0.7, 0), pt(0.7, 0.4))
+        p.drawLine(pt(0.4, 0), pt(0.4, 0.3))
+    elif kind == "add":
+        p.drawLine(pt(0, -0.9), pt(0, 0.9))
+        p.drawLine(pt(-0.9, 0), pt(0.9, 0))
+    elif kind == "history":
+        p.drawEllipse(QRectF(pt(-0.95, -0.95), pt(0.95, 0.95)))
+        p.drawPolyline(QPolygonF([pt(0, -0.55), pt(0, 0), pt(0.45, 0.3)]))
+    elif kind == "settings":
+        for index in range(8):
+            import math
+            angle = index * math.pi / 4
+            p.drawLine(pt(0.6 * math.cos(angle), 0.6 * math.sin(angle)),
+                       pt(1.0 * math.cos(angle), 1.0 * math.sin(angle)))
+        p.drawEllipse(QRectF(pt(-0.62, -0.62), pt(0.62, 0.62)))
+        p.drawEllipse(QRectF(pt(-0.22, -0.22), pt(0.22, 0.22)))
+    elif kind == "log":
+        p.drawRoundedRect(QRectF(pt(-0.75, -1.0), pt(0.75, 1.0)), u * 0.12, u * 0.12)
+        for y in (-0.5, -0.1, 0.3, 0.65):
+            p.drawLine(pt(-0.4, y), pt(0.4 if y < 0.6 else 0.05, y))
+    elif kind == "about":
+        p.drawLine(pt(0, -0.15), pt(0, 0.85))
+        p.setBrush(QColor("#FFFFFF"))
+        p.drawEllipse(pt(0, -0.7), u * 0.08, u * 0.08)
+    elif kind == "restart":
+        p.drawArc(QRectF(pt(-0.9, -0.85), pt(0.9, 0.95)), 120 * 16, 300 * 16)
+        p.drawLine(pt(0, -1.05), pt(0, -0.05))
+    p.end()
+    pixmap.setDevicePixelRatio(scale)
+    return pixmap
+
+
+def eus_icon(kind: str, size: int = 56) -> "QIcon":
+    return QIcon(paint_icon(kind, size))
+
+
+class SidebarButton(QPushButton):
+    """Category button; the selected one points into the panel (netbook style)."""
+
+    ARROW = 11
+
+    def __init__(self, kind: str, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("sidebarButton")
+        self.setCheckable(True)
+        self.setAutoExclusive(True)
+        self.setIcon(eus_icon(kind, 30))
+        self.setIconSize(QSize(30, 30))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(46)
+        self.badge = 0
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        from PyQt6.QtGui import QPainter, QPolygonF
+        from PyQt6.QtCore import QPointF
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        right = self.width() - self.ARROW - 1
+        middle = self.height() / 2
+        if self.isChecked():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#CFE7DA"))
+            painter.drawPolygon(QPolygonF([QPointF(right - 1, middle - self.ARROW),
+                                           QPointF(right + self.ARROW, middle),
+                                           QPointF(right - 1, middle + self.ARROW)]))
+        if self.badge:
+            text = str(self.badge) if self.badge < 100 else "99+"
+            width = max(18, painter.fontMetrics().horizontalAdvance(text) + 10)
+            rect = QRectF(right - width - 8, middle - 9, width, 18)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#C53030"))
+            painter.drawRoundedRect(rect, 9, 9)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+
+
+class Tile(QToolButton):
+    """Large launcher icon with its label underneath and an optional badge."""
+
+    def __init__(self, kind: str, text: str, handler, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("tile")
+        self.setText(text)
+        self.setIcon(eus_icon(kind, 56))
+        self.setIconSize(QSize(56, 56))
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(150, 116)
+        self.badge = 0
+        self.clicked.connect(handler)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.badge:
+            return
+        from PyQt6.QtGui import QPainter
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        text = str(self.badge) if self.badge < 100 else "99+"
+        width = max(20, painter.fontMetrics().horizontalAdvance(text) + 10)
+        rect = QRectF(self.width() / 2 + 14, 4, width, 20)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#C53030"))
+        painter.drawRoundedRect(rect, 10, 10)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+
+
+def tile_grid(tiles: list["Tile"], columns: int = 3) -> QWidget:
+    holder = QWidget()
+    grid = QGridLayout(holder)
+    grid.setContentsMargins(12, 8, 12, 8)
+    grid.setHorizontalSpacing(18)
+    grid.setVerticalSpacing(14)
+    for index, tile in enumerate(tiles):
+        grid.addWidget(tile, index // columns, index % columns, Qt.AlignmentFlag.AlignCenter)
+    grid.setRowStretch(len(tiles) // columns + 1, 1)
+    grid.setColumnStretch(columns, 1)
+    return holder
+
+
 class UpdateWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -2597,14 +2846,17 @@ class UpdateWindow(QMainWindow):
         self.reload_timer.timeout.connect(self.reload_from_disk)
         self.setWindowTitle("Update Manager — Eduka-Update-System")
         self.setWindowIcon(QIcon(EUS_APP_ICON))
-        self.resize(760, 540)
-        self.setMinimumSize(560, 400)
+        self.resize(860, 560)
+        self.setMinimumSize(700, 460)
         self.build_ui()
         self.apply_style()
         self.setup_window_shortcuts()
         self.setup_watcher()
         self.load_updates()
         self.refresh_banners()
+        self.load_saved_health()
+        if not self.health_data:
+            self.scan_health(deep=False)
 
     def t(self, key: str, **values) -> str:
         return translate(self.lang, key, **values)
@@ -2625,44 +2877,6 @@ class UpdateWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
 
-    def build_main_menu(self) -> QMenu:
-        """Every secondary feature lives in this single menu."""
-        menu = QMenu(self)
-
-        def add(text: str, handler, shortcut: str = "") -> QAction:
-            action = menu.addAction(text)
-            action.triggered.connect(handler)
-            if shortcut:
-                action.setShortcut(QKeySequence(shortcut))
-            return action
-
-        self.select_all_action = add(self.t("mm_select_all"), lambda: self.set_all_checked(True))
-        self.clear_action = add(self.t("mm_clear"), lambda: self.set_all_checked(False))
-        self.select_security_action = add(self.t("mm_select_security"), self.select_security_only)
-        menu.addSeparator()
-        self.cleaner_action = add(self.t("mm_cleaner"), self.show_cleaner)
-        self.kernel_action = add(self.t("mm_kernels"), self.show_kernels)
-        self.upgrade_action = add(self.t("mm_upgrade"), self.show_upgrade_os)
-        menu.addSeparator()
-        sources = menu.addMenu(self.t("mm_sources"))
-        for text, handler in ((self.t("mm_keyfix"), self.show_key_fix),
-                              (self.t("mm_addrepo"), self.show_add_repo),
-                              (self.t("mm_addkey"), self.show_add_key)):
-            action = sources.addAction(text)
-            action.triggered.connect(handler)
-        self.sources_menu = sources
-        menu.addSeparator()
-        self.history_action = add(self.t("history"), self.show_history, "Ctrl+H")
-        self.settings_action = add(self.t("settings"), self.show_settings)
-        add(self.t("action_log"), self.show_log)
-        add(self.t("about"), self.show_about)
-        menu.addSeparator()
-        add(self.t("action_quit"), self.close, "Ctrl+Q")
-        self.busy_actions = [self.select_all_action, self.clear_action, self.select_security_action,
-                             self.cleaner_action, self.kernel_action, self.upgrade_action,
-                             self.history_action, self.settings_action, sources.menuAction()]
-        return menu
-
     def make_banner(self, kind: str, button_text: str, handler) -> tuple[QFrame, QLabel, QPushButton]:
         frame = QFrame(objectName=f"banner_{kind}")
         row = QHBoxLayout(frame)
@@ -2679,55 +2893,191 @@ class UpdateWindow(QMainWindow):
         frame.hide()
         return frame, label, button
 
+    def page_header(self, title: str, subtitle_widget: QWidget | None = None) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(4, 0, 4, 2)
+        column = QVBoxLayout()
+        column.setSpacing(0)
+        column.addWidget(QLabel(title, objectName="pageTitle"))
+        if subtitle_widget is not None:
+            column.addWidget(subtitle_widget)
+        row.addLayout(column, 1)
+        return row
+
     def build_ui(self) -> None:
-        central = QWidget(objectName="body")
+        central = QWidget(objectName="backdrop")
         self.setCentralWidget(central)
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer = QHBoxLayout(central)
+        outer.setContentsMargins(10, 10, 12, 10)
         outer.setSpacing(0)
 
-        toolbar = QFrame(objectName="toolbar")
-        bar = QHBoxLayout(toolbar)
-        bar.setContentsMargins(10, 6, 8, 6)
-        bar.setSpacing(6)
-        icon = QLabel()
-        icon.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(22, 22)))
-        bar.addWidget(icon)
-        self.status_title = QLabel(objectName="statusTitle")
-        self.status_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        bar.addWidget(self.status_title, 1)
-        self.check_button = QPushButton(self.t("tb_refresh"), objectName="secondaryButton")
-        self.check_button.setToolTip(self.t("check_updates") + " (Ctrl+R)")
-        self.check_button.clicked.connect(self.check_updates)
-        self.install_button = QPushButton(self.t("install"), objectName="primaryButton")
-        self.install_button.clicked.connect(self.install_updates)
-        self.menu_button = QToolButton(objectName="menuButton")
-        self.menu_button.setText("☰")
-        self.menu_button.setToolTip(self.t("tb_menu"))
-        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.menu_button.setMenu(self.build_main_menu())
-        bar.addWidget(self.check_button)
-        bar.addWidget(self.install_button)
-        bar.addWidget(self.menu_button)
-        outer.addWidget(toolbar)
+        # ---- sidebar: categories, the selected one points into the panel
+        sidebar = QWidget(objectName="sidebar")
+        sidebar.setFixedWidth(206)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(0, 0, 0, 0)
+        side.setSpacing(5)
+        brand = QHBoxLayout()
+        brand.setContentsMargins(8, 2, 8, 8)
+        logo = QLabel()
+        logo.setPixmap(QIcon(EUS_APP_ICON).pixmap(QSize(28, 28)))
+        brand.addWidget(logo)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(0)
+        brand_text.addWidget(QLabel("Update Manager", objectName="brandTitle"))
+        brand_text.addWidget(QLabel("Edukasaun OS", objectName="brandSubtitle"))
+        brand.addLayout(brand_text, 1)
+        side.addLayout(brand)
+        self.pages = QStackedWidget(objectName="pages")
+        self.nav: dict[str, SidebarButton] = {}
+        for key, kind in (("home", "home"), ("updates", "updates"), ("health", "health"),
+                          ("maintenance", "maintenance"), ("sources", "sources"), ("settings", "settings")):
+            button = SidebarButton(kind, self.t("nav_" + key))
+            button.clicked.connect(lambda _c=False, k=key: self.show_page(k))
+            side.addWidget(button)
+            self.nav[key] = button
+        side.addStretch(1)
+        side.addWidget(QLabel(f"Eduka-Update-System {self.version}", objectName="versionLabel"))
+        outer.addWidget(sidebar)
 
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(8, 6, 8, 0)
-        layout.setSpacing(4)
+        # ---- panel: soft card with a faint shadow
+        panel = QFrame(objectName="panel")
+        shadow = QGraphicsDropShadowEffect(panel)
+        shadow.setBlurRadius(22)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 45))
+        panel.setGraphicsEffect(shadow)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 12, 14, 10)
+        panel_layout.setSpacing(6)
         self.self_banner, self.self_label, _ = self.make_banner("self", self.t("sb_install_first"),
                                                                self.install_self_update)
-        self.os_banner, self.os_label, _ = self.make_banner("os", self.t("open_upgrade"), self.show_upgrade_os)
+        self.os_banner, self.os_label, self.os_button = self.make_banner("os", self.t("open_upgrade"),
+                                                                         self.open_major_update)
         self.restart_banner, self.restart_label, _ = self.make_banner("restart", self.t("restart_now"),
                                                                       self.confirm_reboot)
+        self.health_banner, self.health_label, _ = self.make_banner("health", self.t("hb_open"),
+                                                                    lambda: self.show_page("health"))
         self.repo_banner, self.repo_label, _ = self.make_banner("repo", self.t("open_keyfix"), self.show_key_fix)
         self.pause_banner, self.pause_label, _ = self.make_banner("pause", self.t("resume"), self.resume_updates)
         self.kernel_banner, self.kernel_label, _ = self.make_banner("kernel", self.t("open_kernel"),
                                                                     self.show_kernels)
-        self.banners = [self.self_banner, self.os_banner, self.restart_banner, self.repo_banner,
-                        self.pause_banner, self.kernel_banner]
+        self.banners = [self.self_banner, self.os_banner, self.restart_banner, self.health_banner,
+                        self.repo_banner, self.pause_banner, self.kernel_banner]
         for banner in self.banners:
-            layout.addWidget(banner)
+            panel_layout.addWidget(banner)
+        panel_layout.addWidget(self.pages, 1)
+        outer.addWidget(panel, 1)
+
+        self.pages.addWidget(self.build_home_page())
+        self.pages.addWidget(self.build_updates_page())
+        self.pages.addWidget(self.build_health_page())
+        self.pages.addWidget(self.build_tiles_page("nav_maintenance", "maintenance_intro", [
+            Tile("cleaner", self.t("tile_cleaner"), self.show_cleaner),
+            Tile("kernel", self.t("tile_kernels"), self.show_kernels),
+            Tile("history", self.t("history"), self.show_history),
+            Tile("log", self.t("action_log"), self.show_log)]))
+        self.pages.addWidget(self.build_tiles_page("nav_sources", "sources_intro", [
+            Tile("key", self.t("tile_keyfix"), self.show_key_fix),
+            Tile("sources", self.t("tile_addrepo"), self.show_add_repo),
+            Tile("add", self.t("tile_addkey"), self.show_add_key)]))
+        self.pages.addWidget(self.build_tiles_page("nav_settings", "settings_intro", [
+            Tile("settings", self.t("tile_settings"), self.show_settings),
+            Tile("about", self.t("about"), self.show_about)]))
+        self.page_keys = ["home", "updates", "health", "maintenance", "sources", "settings"]
+
+        status = self.statusBar()
+        status.setSizeGripEnabled(True)
+        self.select_all = QCheckBox()
+        self.select_all.setToolTip(self.t("select_all"))
+        self.select_all.setChecked(True)
+        self.select_all.stateChanged.connect(self.toggle_all)
+        self.selection_label = QLabel(objectName="selectionLabel")
+        self.progress_detail = QLabel(objectName="progressDetail")
+        self.progress_detail.hide()
+        self.global_progress = QProgressBar(objectName="globalProgress")
+        self.global_progress.setRange(0, 0)
+        self.global_progress.setTextVisible(False)
+        self.global_progress.setFixedSize(110, 6)
+        self.global_progress.hide()
+        self.last_checked = QLabel(objectName="muted")
+        self.schedule_label = self.last_checked
+        status.addWidget(self.select_all)
+        status.addWidget(self.selection_label)
+        status.addWidget(self.progress_detail, 1)
+        status.addPermanentWidget(self.global_progress)
+        status.addPermanentWidget(self.last_checked)
+        self.busy_actions = []
+        self.show_page("home")
+
+    def build_home_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.home_status = QLabel(objectName="pageTitle")
+        self.home_status.setWordWrap(True)
+        self.home_detail = QLabel(objectName="muted")
+        self.home_detail.setWordWrap(True)
+        layout.addWidget(self.home_status)
+        layout.addWidget(self.home_detail)
+        self.tile_updates = Tile("updates", self.t("tile_updates"), lambda: self.show_page("updates"))
+        self.tile_check = Tile("refresh", self.t("tile_check"), self.check_updates)
+        self.tile_health = Tile("health", self.t("nav_health"), lambda: self.show_page("health"))
+        self.tile_major = Tile("major", self.t("tile_major"), self.open_major_update)
+        self.tile_cleaner = Tile("cleaner", self.t("tile_cleaner"), self.show_cleaner)
+        self.tile_kernels = Tile("kernel", self.t("tile_kernels"), self.show_kernels)
+        self.tile_sources = Tile("sources", self.t("nav_sources"), lambda: self.show_page("sources"))
+        self.tile_settings = Tile("settings", self.t("tile_settings"), self.show_settings)
+        self.home_tiles = [self.tile_updates, self.tile_check, self.tile_health, self.tile_major,
+                           self.tile_cleaner, self.tile_kernels, self.tile_sources, self.tile_settings]
+        self.home_grid = QWidget()
+        self.home_layout = QGridLayout(self.home_grid)
+        self.home_layout.setContentsMargins(12, 8, 12, 8)
+        self.home_layout.setHorizontalSpacing(18)
+        self.home_layout.setVerticalSpacing(14)
+        layout.addWidget(self.home_grid, 1)
+        self.layout_home_tiles(show_major=False)
+        return page
+
+    def layout_home_tiles(self, show_major: bool) -> None:
+        """Place only the visible tiles, so a hidden one leaves no gap."""
+        for tile in self.home_tiles:
+            self.home_layout.removeWidget(tile)
+        visible = [t for t in self.home_tiles if t is not self.tile_major or show_major]
+        self.tile_major.setVisible(show_major)
+        for index, tile in enumerate(visible):
+            self.home_layout.addWidget(tile, index // 3, index % 3, Qt.AlignmentFlag.AlignCenter)
+        self.home_layout.setRowStretch(len(visible) // 3 + 1, 1)
+        self.home_layout.setColumnStretch(3, 1)
+
+    def build_tiles_page(self, title_key: str, intro_key: str, tiles: list[Tile]) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        intro = QLabel(self.t(intro_key), objectName="muted")
+        intro.setWordWrap(True)
+        layout.addLayout(self.page_header(self.t(title_key), intro))
+        layout.addWidget(tile_grid(tiles), 1)
+        return page
+
+    def build_updates_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        self.status_title = QLabel(objectName="pageTitle")
+        self.status_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        header.addWidget(self.status_title, 1)
+        self.check_button = QPushButton(self.t("tb_refresh"), objectName="secondaryButton")
+        self.check_button.setIcon(eus_icon("refresh", 18))
+        self.check_button.setToolTip(self.t("check_updates") + " (Ctrl+R)")
+        self.check_button.clicked.connect(self.check_updates)
+        self.install_button = QPushButton(self.t("install"), objectName="primaryButton")
+        self.install_button.clicked.connect(self.install_updates)
+        header.addWidget(self.check_button)
+        header.addWidget(self.install_button)
+        layout.addLayout(header)
 
         self.tree = QTreeWidget(objectName="updatesTree")
         self.tree.setColumnCount(5)
@@ -2775,38 +3125,73 @@ class UpdateWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([330, 130])
+        splitter.setSizes([300, 120])
         layout.addWidget(splitter, 1)
-        outer.addWidget(body, 1)
+        return page
 
-        status = self.statusBar()
-        status.setSizeGripEnabled(True)
-        self.select_all = QCheckBox()
-        self.select_all.setToolTip(self.t("select_all"))
-        self.select_all.setChecked(True)
-        self.select_all.stateChanged.connect(self.toggle_all)
-        self.selection_label = QLabel(objectName="selectionLabel")
-        self.progress_detail = QLabel(objectName="progressDetail")
-        self.progress_detail.hide()
-        self.global_progress = QProgressBar(objectName="globalProgress")
-        self.global_progress.setRange(0, 0)
-        self.global_progress.setTextVisible(False)
-        self.global_progress.setFixedSize(110, 6)
-        self.global_progress.hide()
-        self.last_checked = QLabel(objectName="muted")
-        self.schedule_label = self.last_checked
-        status.addWidget(self.select_all)
-        status.addWidget(self.selection_label)
-        status.addWidget(self.progress_detail, 1)
-        status.addPermanentWidget(self.global_progress)
-        status.addPermanentWidget(self.last_checked)
+    def build_health_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.health_summary = QLabel(objectName="muted")
+        self.health_summary.setWordWrap(True)
+        header = self.page_header(self.t("nav_health"), self.health_summary)
+        self.health_scan_button = QPushButton(self.t("hp_scan"), objectName="secondaryButton")
+        self.health_scan_button.clicked.connect(lambda: self.scan_health(deep=True))
+        self.health_fix_button = QPushButton(self.t("hp_fix"), objectName="primaryButton")
+        self.health_fix_button.clicked.connect(self.fix_health)
+        header.addWidget(self.health_scan_button)
+        header.addWidget(self.health_fix_button)
+        layout.addLayout(header)
+        self.health_tree = QTreeWidget(objectName="healthTree")
+        self.health_tree.setColumnCount(2)
+        self.health_tree.setHeaderHidden(True)
+        self.health_tree.setRootIsDecorated(False)
+        self.health_tree.setWordWrap(True)
+        self.health_tree.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.health_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.health_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.health_tree.itemChanged.connect(lambda *_: self.update_health_buttons())
+        self.health_tree.itemDoubleClicked.connect(self.open_health_item)
+        layout.addWidget(self.health_tree, 1)
+        self.health_task = PrivilegedTask(self, page)
+        self.health_task.finished.connect(self.health_fixed)
+        layout.addWidget(self.health_task)
+        self.health_process: QProcess | None = None
+        self.health_data: dict = {}
+        return page
+
+    def show_page(self, key: str) -> None:
+        if key not in getattr(self, "page_keys", []):
+            return
+        self.pages.setCurrentIndex(self.page_keys.index(key))
+        self.nav[key].setChecked(True)
+        on_updates = key == "updates"
+        self.select_all.setVisible(on_updates)
+        self.selection_label.setVisible(on_updates and not self.is_busy())
+        if key == "health" and not self.health_data.get("findings_shown"):
+            self.scan_health(deep=True)
 
     def apply_style(self) -> None:
         self.setStyleSheet(
             """
-            QWidget#body, QDialog { background: #F6F7F6; }
-            QFrame#toolbar { background: #FFFFFF; border-bottom: 1px solid #E1E4E2; }
-            QLabel#statusTitle { font-weight: 600; color: #1F2933; padding-left: 4px; }
+            QWidget#backdrop { background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #EEF3EF, stop:1 #DCE6E0); }
+            QDialog { background: #F6F8F7; }
+            QLabel#brandTitle { font-weight: 700; color: #14532D; }
+            QLabel#brandSubtitle, QLabel#versionLabel { color: #5B6B63; }
+            QLabel#versionLabel { padding: 6px 8px; }
+            QPushButton#sidebarButton { text-align: left; padding: 4px 10px; margin-right: 11px;
+                border: 1px solid rgba(20, 60, 40, 0.10); border-radius: 7px; color: #1F2933;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.85),
+                stop:1 rgba(240,245,242,0.85)); font-weight: 600; }
+            QPushButton#sidebarButton:hover { background: rgba(255,255,255,0.97); }
+            QPushButton#sidebarButton:checked { color: #0F4D33; border-color: rgba(21,122,85,0.30);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #E3F2EA, stop:1 #CFE7DA); }
+            QFrame#panel { background: rgba(255, 255, 255, 0.94); border: 1px solid rgba(20, 60, 40, 0.10);
+                border-radius: 10px; }
+            QStackedWidget#pages, QStackedWidget#pages > QWidget { background: transparent; }
+            QLabel#pageTitle { font-weight: 700; color: #1F2933; padding: 2px 0; }
             QLabel#muted { color: #6B7280; }
             QLabel#selectionLabel { color: #374151; }
             QLabel#progressDetail { color: #374151; }
@@ -2815,18 +3200,23 @@ class UpdateWindow(QMainWindow):
             QLabel#runningKernel { color: #0F7B4F; font-weight: 600; }
             QLabel#pauseStatus { font-weight: 600; color: #05603A; }
             QLabel#pauseStatus[paused="true"] { color: #93370D; }
-            QFrame#banner_self, QFrame#banner_os { background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 4px; }
-            QFrame#banner_restart { background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 4px; }
-            QFrame#banner_repo { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 4px; }
-            QFrame#banner_pause { background: #FEFCE8; border: 1px solid #FDE68A; border-radius: 4px; }
-            QFrame#banner_kernel { background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 4px; }
-            QPushButton { min-height: 24px; padding: 0 10px; border-radius: 4px; }
-            QPushButton#secondaryButton, QPushButton#chipButton { background: #FFFFFF; color: #1F2933;
-                border: 1px solid #C8CECB; }
-            QPushButton#secondaryButton:hover, QPushButton#chipButton:hover { background: #F3F4F6; }
+            QToolButton#tile { border: 1px solid transparent; border-radius: 10px; background: transparent;
+                color: #1F2933; padding: 6px 4px 4px 4px; }
+            QToolButton#tile:hover { background: rgba(21, 122, 85, 0.07); border-color: rgba(21, 122, 85, 0.16); }
+            QToolButton#tile:pressed { background: rgba(21, 122, 85, 0.13); }
+            QToolButton#tile:disabled { color: #9CA3AF; }
+            QFrame#banner_self, QFrame#banner_os { background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 6px; }
+            QFrame#banner_restart { background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 6px; }
+            QFrame#banner_repo, QFrame#banner_health { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 6px; }
+            QFrame#banner_pause { background: #FEFCE8; border: 1px solid #FDE68A; border-radius: 6px; }
+            QFrame#banner_kernel { background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 6px; }
+            QPushButton { min-height: 24px; padding: 0 10px; border-radius: 5px; }
+            QPushButton#secondaryButton, QPushButton#chipButton { color: #1F2933; border: 1px solid #C8CECB;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFFFFF, stop:1 #F1F4F2); }
+            QPushButton#secondaryButton:hover, QPushButton#chipButton:hover { background: #FFFFFF; }
             QPushButton#secondaryButton:disabled { color: #9CA3AF; border-color: #E5E7EB; }
-            QPushButton#primaryButton { background: #157A55; color: #FFFFFF; border: 1px solid #0F5C3F;
-                font-weight: 600; }
+            QPushButton#primaryButton { color: #FFFFFF; border: 1px solid #0F5C3F; font-weight: 600;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1E8C62, stop:1 #157A55); }
             QPushButton#primaryButton:hover { background: #10684A; }
             QPushButton#primaryButton:disabled { background: #B8CEC5; border-color: #A9BFB6; }
             QPushButton#dangerButton { background: #FFFFFF; color: #B42318; border: 1px solid #F04438; }
@@ -2835,28 +3225,23 @@ class UpdateWindow(QMainWindow):
                 min-height: 20px; padding: 0 6px; }
             QPushButton#linkButton:hover { text-decoration: underline; }
             QPushButton#chipButton { min-height: 22px; padding: 0; }
-            QToolButton#menuButton { border: 1px solid #C8CECB; border-radius: 4px; background: #FFFFFF;
-                min-width: 26px; min-height: 24px; padding: 0 4px; }
-            QToolButton#menuButton:hover { background: #F3F4F6; }
-            QToolButton#menuButton::menu-indicator { image: none; width: 0; }
             QMenu { background: #FFFFFF; border: 1px solid #D1D5DB; padding: 4px; }
             QMenu::item { padding: 5px 22px 5px 14px; border-radius: 3px; }
             QMenu::item:selected { background: #E8F3EE; color: #0F5C3F; }
-            QMenu::item:disabled { color: #9CA3AF; }
-            QMenu::separator { height: 1px; background: #E5E7EB; margin: 4px 6px; }
             QTreeWidget { background: #FFFFFF; alternate-background-color: #FAFBFA; border: 1px solid #E1E4E2;
-                outline: 0; }
+                border-radius: 6px; outline: 0; }
             QTreeWidget::item { min-height: 24px; }
+            QTreeWidget#healthTree::item { min-height: 34px; }
             QTreeWidget::item:selected { background: #DCEFE6; color: #111827; }
             QHeaderView::section { background: #FFFFFF; color: #6B7280; border: 0;
                 border-bottom: 1px solid #E1E4E2; padding: 4px 6px; }
-            QTabWidget#details::pane { border: 1px solid #E1E4E2; background: #FFFFFF; top: -1px; }
+            QTabWidget#details::pane { border: 1px solid #E1E4E2; border-radius: 6px; background: #FFFFFF; top: -1px; }
             QTabBar::tab { background: transparent; border: 0; padding: 4px 10px; color: #6B7280; }
             QTabBar::tab:selected { color: #14532D; border-bottom: 2px solid #157A55; }
             QPlainTextEdit { border: 0; background: #FFFFFF; }
-            QStatusBar { background: #FFFFFF; border-top: 1px solid #E1E4E2; }
+            QStatusBar { background: transparent; }
             QStatusBar::item { border: 0; }
-            QGroupBox { font-weight: 600; border: 1px solid #E1E4E2; border-radius: 4px; margin-top: 8px;
+            QGroupBox { font-weight: 600; border: 1px solid #E1E4E2; border-radius: 6px; margin-top: 8px;
                 padding: 8px 6px 6px 6px; background: #FFFFFF; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }
             QLineEdit, QComboBox { min-height: 24px; padding: 0 6px; border: 1px solid #C8CECB;
@@ -2873,6 +3258,160 @@ class UpdateWindow(QMainWindow):
             QTabWidget::pane { border: 1px solid #E1E4E2; background: #FFFFFF; }
             """
         )
+
+    # ------------------------------------------------------------- health
+    def scan_health(self, deep: bool = True) -> None:
+        if self.health_process is not None:
+            return
+        fixture = os.environ.get("EUS_HEALTH_FIXTURE")
+        if fixture:
+            try:
+                self.populate_health(json.loads(Path(fixture).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                self.populate_health({})
+            return
+        self.health_summary.setText(self.t("hp_scanning"))
+        self.health_scan_button.setEnabled(False)
+        process = QProcess(self)
+        self.health_process = process
+
+        def done(exit_code: int, _status=None) -> None:
+            if self.health_process is not process:
+                return
+            self.health_process = None
+            try:
+                data = json.loads(bytes(process.readAllStandardOutput()).decode("utf-8", "replace")) \
+                    if exit_code == 0 else {}
+            except ValueError:
+                data = {}
+            process.deleteLater()
+            self.health_scan_button.setEnabled(True)
+            self.populate_health(data)
+
+        process.finished.connect(done)
+        process.errorOccurred.connect(lambda _e: done(1))
+        command = tool_command("health", *([] if deep else ["--quick"]))
+        process.start(command[0], command[1:])
+
+    def load_saved_health(self) -> None:
+        try:
+            data = json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if data:
+            self.populate_health(data, shown=False)
+
+    def populate_health(self, data: dict, shown: bool = True) -> None:
+        self.health_data = dict(data)
+        self.health_data["findings_shown"] = shown
+        findings = data.get("findings", [])
+        recommendations = data.get("recommendations", [])
+        problems = [f for f in findings if f.get("severity") in {"critical", "warning"}]
+        self.health_tree.blockSignals(True)
+        self.health_tree.clear()
+        colors = {"critical": "#B42318", "warning": "#B45309", "info": "#1D4ED8", "recommend": "#0F7B4F"}
+        for section, items in ((self.t("hp_findings"), findings), (self.t("hp_recommendations"), recommendations)):
+            if not items:
+                continue
+            group = QTreeWidgetItem([section])
+            group.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            font = group.font(0)
+            font.setBold(True)
+            group.setFont(0, font)
+            self.health_tree.addTopLevelItem(group)
+            group.setFirstColumnSpanned(True)
+            for item in items:
+                label = self.t("sev_" + item.get("severity", "info"))
+                text = f"{item['title']}\n{item.get('detail', '')}".strip()
+                row = QTreeWidgetItem([text, label])
+                row.setData(0, Qt.ItemDataRole.UserRole, item)
+                row.setForeground(1, QBrush(QColor(colors.get(item.get("severity"), "#374151"))))
+                bold = row.font(1)
+                bold.setBold(True)
+                row.setFont(1, bold)
+                row.setToolTip(0, text)
+                if item.get("fix"):
+                    row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    default = item.get("severity") in {"critical", "warning"}
+                    row.setCheckState(0, Qt.CheckState.Checked if default else Qt.CheckState.Unchecked)
+                elif item.get("page"):
+                    row.setText(1, f"{label} · {self.t('hp_open')}")
+                self.health_tree.addTopLevelItem(row)
+        if not findings and not recommendations:
+            ok = QTreeWidgetItem([self.t("hp_ok")])
+            ok.setForeground(0, QBrush(QColor("#0F7B4F")))
+            self.health_tree.addTopLevelItem(ok)
+        self.health_tree.blockSignals(False)
+        try:
+            when = format_date(int(data.get("checked_at", 0))) if data.get("checked_at") else "—"
+        except (TypeError, ValueError):
+            when = "—"
+        if problems:
+            self.health_summary.setText(self.t("hp_problems", count=len(problems), time=when))
+        else:
+            self.health_summary.setText(self.t("hp_good", time=when))
+        self.nav["health"].badge = len(problems)
+        self.nav["health"].update()
+        self.tile_health.badge = len(problems)
+        self.tile_health.update()
+        self.health_label.setText(self.t("hb_text", title=problems[0]["title"]) if problems else "")
+        self.health_banner.setVisible(bool(problems))
+        self.update_health_buttons()
+
+    def checked_health_fixes(self) -> list[str]:
+        fixes = []
+        for index in range(self.health_tree.topLevelItemCount()):
+            row = self.health_tree.topLevelItem(index)
+            item = row.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(item, dict) and item.get("fix") and row.checkState(0) == Qt.CheckState.Checked:
+                fixes.append(item["fix"])
+        return fixes
+
+    def update_health_buttons(self) -> None:
+        self.health_fix_button.setEnabled(bool(self.checked_health_fixes()) and not self.is_busy())
+
+    def open_health_item(self, row: QTreeWidgetItem, _column: int = 0) -> None:
+        item = row.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(item, dict) or not item.get("page"):
+            return
+        target = item["page"]
+        if target == "restart":
+            self.confirm_reboot()
+        elif target in {"updates", "health"}:
+            self.show_page(target)
+        else:
+            self.open_page(target)
+
+    def fix_health(self) -> None:
+        fixes = self.checked_health_fixes()
+        if not fixes:
+            return
+        answer = QMessageBox.question(self, self.t("nav_health"), self.t("hp_confirm", count=len(fixes)),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self.health_task.start("health-fix", fixes, self.t("working"))
+
+    def health_fixed(self, success: bool, detail: str) -> None:
+        if not success:
+            QMessageBox.critical(self, self.t("nav_health"), detail)
+        else:
+            try:
+                report = json.loads(REPORT_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report = {}
+            lines = [self.t("hp_fixed")] + [f"• {e}" for e in report.get("errors", [])]
+            QMessageBox.information(self, self.t("nav_health"), "\n".join(lines))
+        self.load_updates()
+        self.refresh_banners()
+        self.scan_health(deep=True)
+
+    def open_major_update(self) -> None:
+        upgrade = read_os_upgrade()
+        if upgrade.get("mode") == "continuous":
+            self.show_page("updates")
+        else:
+            self.show_upgrade_os()
 
     def setup_watcher(self) -> None:
         """Reload when a background refresh (timer or new repository) changes the state."""
@@ -2892,11 +3431,14 @@ class UpdateWindow(QMainWindow):
     def refresh_banners(self) -> None:
         upgrade = read_os_upgrade()
         if upgrade:
-            self.os_label.setText(self.t("banner_os", os=upgrade.get("os_name", "Edukasaun OS"),
+            key = "banner_major" if upgrade.get("mode") == "continuous" else "banner_os"
+            self.os_button.setText(self.t("hb_open") if upgrade.get("mode") == "continuous"
+                                   else self.t("open_upgrade"))
+            self.os_label.setText(self.t(key, os=upgrade.get("os_name", "Edukasaun OS"),
                                          version=upgrade.get("target_version", "").split(".")[0],
                                          codename=upgrade["target_codename"]))
         self.os_banner.setVisible(bool(upgrade))
-        self.upgrade_action.setVisible(bool(upgrade))
+        self.layout_home_tiles(show_major=bool(upgrade))
 
         until = paused_until()
         self.pause_label.setText(self.t("banner_paused", date=format_date(until)))
@@ -2967,6 +3509,22 @@ class UpdateWindow(QMainWindow):
         known = {(r["source"], r["name"]) for r in system_records}
         self.records = system_records + [r for r in user_records if (r["source"], r["name"]) not in known]
         self.groups = group_updates(self.records)
+        upgrade = read_os_upgrade()
+        if upgrade.get("mode") == "continuous":
+            # A new Debian stable arrived through "stable": one major update,
+            # installed with the safe release-upgrade sequence.
+            apt_records = [r for r in self.records if r["source"] == "apt"]
+            if apt_records:
+                major_group = {
+                    "key": ("major", "major"), "source": "apt", "category": "major",
+                    "name": self.t("major_name", version=upgrade.get("target_version", "").split(".")[0],
+                                   codename=upgrade.get("target_codename", "")),
+                    "packages": apt_records, "size": sum(r["size"] for r in apt_records),
+                    "installed": f"Debian {upgrade.get('current_version', '')}",
+                    "candidate": f"Debian {upgrade.get('target_version', '')}",
+                    "description": self.t("major_description", count=len(apt_records)),
+                    "self_update": False, "main": apt_records[0]}
+                self.groups = [major_group] + [g for g in self.groups if g["source"] != "apt"]
         state = self.read_state()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -3010,7 +3568,7 @@ class UpdateWindow(QMainWindow):
         except (ValueError, OSError, OverflowError):
             checked_text = "—"
         self.last_checked.setText(self.t("last_check", time=checked_text))
-        counts = {c: sum(1 for g in self.groups if g["category"] == c) for c in CATEGORY_RANK}
+        counts = {c: sum(1 for g in self.groups if g["category"] == c) for c in list(CATEGORY_RANK) + ["major"]}
         if restart_is_required(state):
             self.status_title.setText(self.t("restart_pending"))
         elif self.groups:
@@ -3023,6 +3581,24 @@ class UpdateWindow(QMainWindow):
         if state.get("checked_at"):
             self.check_button.setText(self.t("tb_refresh"))
         self_update = next((g for g in self.groups if g["self_update"]), None)
+        total = len(self.groups)
+        security = counts.get("critical", 0)
+        if restart_is_required(state):
+            self.home_status.setText(self.t("restart_pending"))
+        elif counts.get("major"):
+            self.home_status.setText(self.t("home_major"))
+        elif total:
+            self.home_status.setText(self.t("home_updates", count=total))
+        elif state.get("state") == "ok":
+            self.home_status.setText(self.t("home_ok"))
+        else:
+            self.home_status.setText(self.t("empty"))
+        self.home_detail.setText(self.t("home_detail_security", count=security) if security
+                                 else self.t("last_check", time=checked_text))
+        self.nav["updates"].badge = total
+        self.nav["updates"].update()
+        self.tile_updates.badge = total
+        self.tile_updates.update()
         self.self_label.setText(self.t("sb_self_update"))
         self.self_banner.setVisible(self_update is not None)
         self.select_all.blockSignals(True)
@@ -3099,7 +3675,12 @@ class UpdateWindow(QMainWindow):
             return
         group = item.data(0, Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        if group["source"] == "apt":
+        for text, handler in ((self.t("mm_select_all"), lambda: self.set_all_checked(True)),
+                              (self.t("mm_clear"), lambda: self.set_all_checked(False)),
+                              (self.t("mm_select_security"), self.select_security_only)):
+            menu.addAction(text).triggered.connect(handler)
+        menu.addSeparator()
+        if group["source"] == "apt" and group["category"] != "major":
             ignore_version = menu.addAction(self.t("cm_ignore_version", version=group["candidate"]))
             ignore_version.triggered.connect(lambda: self.ignore_group(group, versioned=True))
             ignore_all = menu.addAction(self.t("cm_ignore_all"))
@@ -3213,10 +3794,15 @@ class UpdateWindow(QMainWindow):
     def set_busy(self, busy: bool, text: str = "") -> None:
         for widget in (self.check_button, self.select_all):
             widget.setEnabled(not busy)
-        for action in self.busy_actions:
-            action.setEnabled(not busy)
+        for tile in self.findChildren(Tile):
+            tile.setEnabled(not busy)
         for banner in self.banners:
             banner.setEnabled(not busy)
+        self.health_scan_button.setEnabled(not busy)
+        if busy:
+            self.health_fix_button.setEnabled(False)
+        else:
+            self.update_health_buttons()
         self.install_button.setEnabled(not busy and bool(self.selected_groups()))
         self.tree.setColumnHidden(4, not busy)
         self.progress_detail.setVisible(busy)
@@ -3509,6 +4095,9 @@ class UpdateWindow(QMainWindow):
         selected = self.selected_records()
         if not selected or self.is_busy():
             return
+        if any(g["category"] == "major" for g in self.selected_groups()):
+            self.install_major_update()
+            return
         total_size = format_bytes(sum(r["size"] for r in selected))
         text = self.t("confirm", count=len(selected), size=total_size) + "\n\n" + self.t("partial_warning")
         will_need_restart = any(restart_sensitive_package(record) for record in selected)
@@ -3546,6 +4135,22 @@ class UpdateWindow(QMainWindow):
             commands.append(self.root_queue_item("refresh"))
         self.start_queue(commands, "install")
 
+    def install_major_update(self) -> None:
+        upgrade = read_os_upgrade()
+        group = next(g for g in self.groups if g["category"] == "major")
+        answer = QMessageBox.question(
+            self, self.t("major_title"),
+            self.t("major_confirm", version=upgrade.get("target_version", "").split(".")[0],
+                   codename=upgrade.get("target_codename", ""), count=len(group["packages"]),
+                   size=format_bytes(group["size"])),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.install_had_kernel = True
+        command = self.root_queue_item("major-upgrade", records=group["packages"])
+        command["timeout_ms"] = 6 * 3_600_000
+        self.start_queue([command], "install")
+
     # ------------------------------------------------------------- dialogs
     def notifier_enabled(self) -> bool:
         override = Path.home() / ".config/autostart/eduka-update-system-notifier.desktop"
@@ -3577,6 +4182,9 @@ class UpdateWindow(QMainWindow):
         self.refresh_banners()
 
     def open_page(self, page: str) -> None:
+        if page in {"updates", "health", "home"}:
+            self.show_page(page)
+            return
         handlers = {"kernel": self.show_kernels, "key-fix": self.show_key_fix,
                     "cleaner": self.show_cleaner,
                     "add-repo": self.show_add_repo, "upgrade-os": self.show_upgrade_os,
@@ -3799,25 +4407,12 @@ def main() -> int:
 
     if screenshot:
         def save_preview() -> None:
-            target = QApplication.activeModalWidget() or window
-            image = target.grab()
-            menu = window.menu_button.menu()
-            if menu.isVisible():
-                # Compose the open main menu onto the window image.
-                from PyQt6.QtGui import QPainter
-                painter = QPainter(image)
-                painter.drawPixmap(window.mapFromGlobal(menu.pos()), menu.grab())
-                painter.end()
-            image.save(screenshot)
-            app.exit(0)
+            try:
+                target = QApplication.activeModalWidget() or window
+                target.grab().save(screenshot)
+            finally:
+                app.exit(0)
 
-        if os.environ.get("EUS_SCREENSHOT_MENU") == "1":
-            def open_menu() -> None:
-                button = window.menu_button
-                menu = button.menu()
-                menu.popup(button.mapToGlobal(button.rect().bottomRight()) - QPoint(menu.sizeHint().width(), 0))
-
-            QTimer.singleShot(600, open_menu)
 
         QTimer.singleShot(1200, save_preview)
     if page:

@@ -1342,6 +1342,12 @@ def check_os_upgrade() -> dict:
     state = {"available": 0, "os_name": info.get("PRETTY_NAME", "Edukasaun OS"),
              "checked_at": int(time.time()), "current_codename": "", "current_version": "",
              "target_codename": "", "target_version": "", "reason": ""}
+    continuous = check_continuous_release()
+    if continuous is not None:
+        # Edukasaun OS: a new Debian stable is a major system update.
+        state.update(continuous)
+        write_os_state(state)
+        return state
     current = current_release()
     if not current:
         state["reason"] = "no Debian repository is configured"
@@ -1714,6 +1720,394 @@ def changelog(package: str, installed: str, limit: int = 400) -> str:
 
 
 # --------------------------------------------------------------------------
+# Continuous stable: Edukasaun OS follows the Debian "stable" suite
+# --------------------------------------------------------------------------
+
+DEBIAN_NAMES = {10: "buster", 11: "bullseye", 12: "bookworm", 13: "trixie", 14: "forky", 15: "duke"}
+CONTINUOUS_SUFFIXES = ("", "-updates", "-security", "-backports", "-proposed-updates")
+HEALTH_FILE = STATE_DIR / "health.json"
+
+
+def installed_debian_version() -> str:
+    try:
+        value = Path(ROOT + "/etc/debian_version").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return value if re.match(r"^\d", value) else ""
+
+
+def continuous_entries() -> list[dict]:
+    """Enabled Debian entries that use the codename-free 'stable' suite."""
+    result = []
+    for entry in all_entries():
+        if not entry["enabled"] or not entry["uris"] or "deb" not in entry["types"]:
+            continue
+        release = cached_release(entry["uris"][0], entry["suites"][0]) if entry["suites"] else {}
+        if entry_role(entry, release) not in {"debian", "debian-security"}:
+            continue
+        if any(s == "stable" or s.startswith("stable-") for s in entry["suites"]):
+            result.append(entry)
+    return result
+
+
+def check_continuous_release() -> dict | None:
+    """With 'stable' repositories a new Debian release arrives as package
+    updates. Detect it by comparing the archive's version with the installed
+    base, so EUS can present it as one major system update."""
+    main = None
+    for entry in continuous_entries():
+        if "stable" in entry["suites"]:
+            main = entry
+            break
+    if main is None:
+        return None
+    archive = cached_release(main["uris"][0], "stable")
+    installed = installed_debian_version()
+    current_major = major(installed)
+    state = {"mode": "continuous", "current_version": installed,
+             "current_codename": DEBIAN_NAMES.get(current_major, f"Debian {current_major}" if current_major else ""),
+             "target_codename": archive.get("Codename", ""), "target_version": archive.get("Version", ""),
+             "available": 0, "reason": ""}
+    if not archive:
+        state["reason"] = "the stable package lists have not been downloaded yet"
+    elif current_major and major(archive.get("Version", "")) > current_major:
+        state["available"] = 1
+    return state
+
+
+def continuous_stable_plan() -> list[dict]:
+    """Debian entries that name the *current* stable release by codename and
+    can switch to the codename-free 'stable' suite without changing content."""
+    plan = []
+    for entry in all_entries():
+        if not entry["enabled"] or not entry["uris"]:
+            continue
+        uri = entry["uris"][0]
+        for suite in entry["suites"]:
+            base = suite.split("-", 1)[0].split("/", 1)[0]
+            if base in {"stable", "testing", "unstable", "sid", "oldstable", "experimental"}:
+                continue
+            release = cached_release(uri, base) or cached_release(uri, suite)
+            if entry_role(entry, release) not in {"debian", "debian-security"}:
+                continue
+            # The archive itself says this codename *is* stable right now.
+            main_release = cached_release(uri, base)
+            suite_field = (main_release or release).get("Suite", "")
+            if not suite_field.startswith("stable"):
+                continue
+            new = "stable" + suite[len(base):]
+            if suite[len(base):] not in CONTINUOUS_SUFFIXES and not suite[len(base):].startswith("/"):
+                continue
+            plan.append({"file": entry["file"], "line": entry.get("line", entry.get("first_line", 0)) + 1,
+                         "uri": uri, "suite": suite, "new_suite": new, "_entry": entry})
+    return plan
+
+
+def apply_continuous_stable() -> dict:
+    """Rewrite the planned suites (backup first). Used by the package's
+    postinst and by System Health; a no-op on an already continuous system."""
+    require_root()
+    plan = continuous_stable_plan()
+    if not plan:
+        return {"changed": [], "backup": ""}
+    stamp = "continuous-stable-" + time.strftime("%Y%m%d-%H%M%S")
+    by_file: dict[str, list[dict]] = {}
+    for row in plan:
+        by_file.setdefault(row["file"], []).append(row)
+    for file_name, rows in by_file.items():
+        path = Path(file_name)
+        backup_file(path, stamp)
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for row in rows:
+            entry = row["_entry"]
+            if entry["format"] == "list":
+                number = entry["line"]
+                match = re.match(r"^(\s*(?:deb|deb-src)\s+(?:\[[^\]]*\]\s*)?\S+\s+)(\S+)(.*)$", lines[number])
+                if match and match.group(2) == row["suite"]:
+                    lines[number] = match.group(1) + row["new_suite"] + match.group(3)
+            else:
+                for number in range(entry["first_line"], entry["last_line"]):
+                    match = re.match(r"^(\s*Suites\s*:\s*)(.*)$", lines[number], re.I)
+                    if match:
+                        suites = [row["new_suite"] if s == row["suite"] else s for s in match.group(2).split()]
+                        lines[number] = match.group(1) + " ".join(suites)
+        atomic_write(path, "\n".join(lines) + "\n", path.stat().st_mode & 0o777 or 0o644)
+    return {"changed": public(plan), "backup": str(BACKUP_BASE / stamp)}
+
+
+# --------------------------------------------------------------------------
+# System Health: detect damage, recommend fixes and useful additions
+# --------------------------------------------------------------------------
+
+CORE_PACKAGES = ("base-files", "bash", "coreutils", "dpkg", "apt", "libc6", "systemd", "sudo",
+                 "login", "util-linux", "passwd", "polkitd", "pkexec")
+RECOMMENDED_INSTALLS = {
+    "install-intel-microcode": "intel-microcode",
+    "install-amd-microcode": "amd64-microcode",
+    "install-timeshift": "timeshift",
+    "install-zram": "zram-tools",
+    "install-fwupd": "fwupd",
+}
+HEALTH_FIXES = {"dpkg-configure", "fix-broken", "reinstall-damaged", "continuous-stable",
+                "enable-firmware"} | set(RECOMMENDED_INSTALLS)
+
+
+def finding(item_id: str, severity: str, title: str, detail: str = "", fix: str = "",
+            page: str = "") -> dict:
+    return {"id": item_id, "severity": severity, "title": title, "detail": detail, "fix": fix, "page": page}
+
+
+def package_candidate(name: str) -> bool:
+    result = run(["apt-cache", "policy", name], timeout=20, env={**os.environ, "LC_ALL": "C"})
+    match = re.search(r"Candidate: (\S+)", result.stdout.decode("utf-8", "replace"))
+    return bool(match and match.group(1) != "(none)")
+
+
+def installed(name: str) -> bool:
+    return any(p["status"] == "installed" for p in dpkg_packages(name))
+
+
+def damaged_paths(verify_output: str) -> list[str]:
+    """Paths `dpkg --verify` reports as changed (not configuration files) or
+    as missing programs/libraries. Missing documentation is normal (dpkg
+    path-exclude) and ignored."""
+    paths = []
+    for line in verify_output.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        path = fields[-1]
+        changed = len(line) > 12 and line[2] == "5" and line[10] != "c"
+        lost = line.startswith("missing") and re.match(r"^/(usr/)?(s?bin|lib|lib64|libexec)/", path)
+        if changed or lost:
+            paths.append(path)
+    return paths
+
+
+def damaged_core_files() -> list[str]:
+    """Core packages whose installed files no longer match (dpkg --verify)."""
+    present = [p for p in CORE_PACKAGES if installed(p)]
+    if not present:
+        return []
+    result = run(["dpkg", "--verify", *present], timeout=120)
+    damaged = set()
+    for path in damaged_paths(result.stdout.decode("utf-8", "replace")):
+        owner = run(["dpkg-query", "-S", path], timeout=20).stdout.decode("utf-8", "replace")
+        if owner:
+            damaged.add(owner.split(":", 1)[0].split(",")[0].strip())
+    return sorted(damaged)
+
+
+def debian_firmware_missing() -> list[dict]:
+    missing = []
+    for entry in continuous_entries() or [e for e in all_entries() if e["enabled"]]:
+        if not entry["uris"] or "deb" not in entry["types"]:
+            continue
+        release = cached_release(entry["uris"][0], entry["suites"][0]) if entry["suites"] else {}
+        if entry_role(entry, release) != "debian" or any("-" in s for s in entry["suites"]):
+            continue
+        if "main" in entry["components"] and "non-free-firmware" not in entry["components"]:
+            missing.append(entry)
+    return missing
+
+
+def scan_health(deep: bool = True) -> dict:
+    found: list[dict] = []
+    env = {**os.environ, "LC_ALL": "C"}
+
+    # 1. Interrupted package operations.
+    audit = run(["dpkg", "--audit"], timeout=60, env=env).stdout.decode("utf-8", "replace").strip()
+    unfinished = [p["name"] for p in dpkg_packages("*")
+                  if p["status"] in {"half-installed", "half-configured", "unpacked", "triggers-awaited",
+                                     "triggers-pending"}]
+    if audit or unfinished:
+        found.append(finding("dpkg-interrupted", "critical", "A package installation was interrupted",
+                             ", ".join(unfinished[:8]) or audit.splitlines()[0][:160], fix="dpkg-configure"))
+    # 2. Broken dependencies.
+    check = run(["apt-get", "-o", "Debug::NoLocking=1", "check"], timeout=120, env=env)
+    text = (check.stdout + check.stderr).decode("utf-8", "replace")
+    if check.returncode != 0 and ("Unmet dependencies" in text or "broken" in text.lower()):
+        packages = re.findall(r"^\s+(\S+) : Depends", text, re.M)
+        found.append(finding("broken-deps", "critical", "Some packages have broken dependencies",
+                             ", ".join(packages[:8]), fix="fix-broken"))
+    # 3. Damaged core files.
+    if deep:
+        damaged = damaged_core_files()
+        if damaged:
+            found.append(finding("damaged-files", "critical", "Files of core system packages are damaged",
+                                 ", ".join(damaged), fix="reinstall-damaged"))
+    # 4. Disk space.
+    for mount, minimum in (("/", 2 * 1024 ** 3), ("/boot", 80 * 1024 ** 2), ("/var", 1024 ** 3)):
+        path = Path(ROOT + mount) if ROOT else Path(mount)
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        if mount != "/" and os.path.ismount(path) is False:
+            continue
+        if usage.free < minimum or usage.free < usage.total * 0.08:
+            found.append(finding(f"disk-{mount.strip('/') or 'root'}", "warning",
+                                 f"Low disk space on {mount}",
+                                 f"{usage.free / 1024 ** 3:.1f} GB free of {usage.total / 1024 ** 3:.1f} GB",
+                                 page="cleaner"))
+    # 5. Failed services.
+    if shutil.which("systemctl") and Path("/run/systemd/system").is_dir():
+        failed = run(["systemctl", "--failed", "--no-legend", "--plain"], timeout=20, env=env)
+        units = [line.split()[0] for line in failed.stdout.decode("utf-8", "replace").splitlines() if line.strip()]
+        if units:
+            found.append(finding("failed-units", "warning", "System services failed to start",
+                                 ", ".join(units[:8])))
+    # 6. Repositories.
+    problems = apt_problems()
+    if problems["missing_keys"] or problems["expired_keys"] or problems["unsigned"]:
+        found.append(finding("repo-keys", "warning", "Some repositories cannot be verified",
+                             "missing or expired GPG keys", page="key-fix"))
+    if problems["configured_multiple_times"] or find_duplicates(all_entries()):
+        found.append(finding("repo-duplicates", "info", "Duplicate repository entries", page="key-fix"))
+    if problems["unreachable"]:
+        found.append(finding("repo-unreachable", "info", "Some repositories cannot be reached",
+                             ", ".join(u["url"] for u in problems["unreachable"][:3])))
+    # 7. Release policy: Edukasaun OS follows codename-free "stable".
+    plan = continuous_stable_plan()
+    if plan:
+        found.append(finding("codename-repos", "info", "Debian repositories use a release codename",
+                             "Switch them to 'stable' so Edukasaun OS keeps updating continuously: "
+                             + ", ".join(sorted({r["suite"] for r in plan})), fix="continuous-stable"))
+    release = check_continuous_release()
+    if release and release["available"]:
+        found.append(finding("major-update", "info",
+                             f"Major system update available: Debian {major(release['target_version'])} "
+                             f"\"{release['target_codename']}\"", page="updates"))
+    # 8. Kernels.
+    try:
+        kernels = list_kernels(include_available=False)
+        old = [k["release"] for k in kernels["installed"] if k["state"] in {"old", "residual"}]
+        newer = [k["release"] for k in kernels["installed"] if k["state"] == "newer"]
+    except (ToolError, OSError, subprocess.TimeoutExpired):
+        old, newer = [], []
+    if newer:
+        found.append(finding("kernel-restart", "warning", "A newer kernel is installed but not running",
+                             "Restart to use " + newer[0], page="restart"))
+    if len(old) >= 2:
+        found.append(finding("old-kernels", "info", f"{len(old)} old kernels use disk space",
+                             ", ".join(old), page="kernels"))
+    # 9. Held packages.
+    held = run(["apt-mark", "showhold"], timeout=20).stdout.decode("utf-8", "replace").split()
+    if held:
+        found.append(finding("held", "info", "Some packages are held back", ", ".join(held[:8])))
+
+    # Recommendations.
+    recommendations: list[dict] = []
+    try:
+        cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        cpuinfo = ""
+    for vendor, fix_id, package in (("GenuineIntel", "install-intel-microcode", "intel-microcode"),
+                                    ("AuthenticAMD", "install-amd-microcode", "amd64-microcode")):
+        if vendor in cpuinfo and not installed(package) and package_candidate(package):
+            recommendations.append(finding(fix_id, "recommend", "Install CPU microcode updates",
+                                           f"{package} fixes processor bugs and security issues", fix=fix_id))
+    if not installed("timeshift") and package_candidate("timeshift"):
+        recommendations.append(finding("install-timeshift", "recommend", "Install Timeshift",
+                                       "System snapshots let you undo a bad update", fix="install-timeshift"))
+    try:
+        meminfo = Path("/proc/meminfo").read_text(encoding="utf-8")
+        total_kb = int(re.search(r"MemTotal:\s+(\d+)", meminfo).group(1))
+        swaps = Path("/proc/swaps").read_text(encoding="utf-8").strip().splitlines()[1:]
+    except (OSError, AttributeError, ValueError):
+        total_kb, swaps = 0, ["?"]
+    if total_kb and total_kb < 4 * 1024 * 1024 and not swaps and not installed("zram-tools") \
+            and package_candidate("zram-tools"):
+        recommendations.append(finding("install-zram", "recommend", "Enable compressed memory (zram)",
+                                       "Less than 4 GB of RAM and no swap", fix="install-zram"))
+    if not installed("fwupd") and package_candidate("fwupd") and Path("/sys/firmware/efi").exists():
+        recommendations.append(finding("install-fwupd", "recommend", "Install firmware updates (fwupd)",
+                                       "Updates BIOS/UEFI and device firmware from LVFS", fix="install-fwupd"))
+    if debian_firmware_missing():
+        recommendations.append(finding("enable-firmware", "recommend", "Enable the non-free-firmware component",
+                                       "Needed for Wi-Fi, graphics and CPU firmware", fix="enable-firmware"))
+
+    severity_rank = {"critical": 0, "warning": 1, "info": 2, "recommend": 3}
+    found.sort(key=lambda f: severity_rank.get(f["severity"], 9))
+    status = "critical" if any(f["severity"] == "critical" for f in found) else (
+        "warning" if any(f["severity"] == "warning" for f in found) else "ok")
+    return {"checked_at": int(time.time()), "status": status, "findings": found,
+            "recommendations": recommendations}
+
+
+def save_health(data: dict) -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        atomic_write(HEALTH_FILE, json.dumps(data, indent=1), 0o644)
+    except OSError:
+        pass
+
+
+def enable_firmware_component() -> list[str]:
+    stamp = "firmware-" + time.strftime("%Y%m%d-%H%M%S")
+    changed = []
+    for entry in debian_firmware_missing():
+        path = Path(entry["file"])
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if entry["format"] == "list":
+            lines[entry["line"]] = lines[entry["line"]].rstrip() + " non-free-firmware"
+        else:
+            for number in range(entry["first_line"], entry["last_line"]):
+                if re.match(r"^\s*Components\s*:", lines[number], re.I):
+                    lines[number] = lines[number].rstrip() + " non-free-firmware"
+        backup_file(path, stamp)
+        atomic_write(path, "\n".join(lines) + "\n", path.stat().st_mode & 0o777 or 0o644)
+        changed.append(str(path))
+    return changed
+
+
+def fix_health(ids: list[str]) -> dict:
+    """Apply the selected System Health fixes (root, through the backend)."""
+    require_root()
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive", "LC_ALL": "C"}
+    apt = ["apt-get", "-y", "-q", "-o", "DPkg::Lock::Timeout=120",
+           "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
+    done, errors = [], []
+    order = ["dpkg-configure", "fix-broken", "reinstall-damaged", "continuous-stable", "enable-firmware",
+             *RECOMMENDED_INSTALLS]
+    selected = [i for i in order if i in ids]
+    need_update = False
+    for index, item in enumerate(selected):
+        progress(5 + index * 85 // max(1, len(selected)), f"Fixing: {item}")
+        try:
+            if item == "dpkg-configure":
+                if run(["dpkg", "--configure", "-a"], timeout=3600, env=env).returncode != 0:
+                    raise ToolError("dpkg --configure -a failed")
+            elif item == "fix-broken":
+                if run(apt + ["--fix-broken", "install"], timeout=3600, env=env).returncode != 0:
+                    raise ToolError("apt-get --fix-broken install failed")
+            elif item == "reinstall-damaged":
+                damaged = damaged_core_files()
+                if damaged and run(apt + ["install", "--reinstall", *damaged], timeout=3600,
+                                   env=env).returncode != 0:
+                    raise ToolError("reinstalling " + ", ".join(damaged) + " failed")
+            elif item == "continuous-stable":
+                apply_continuous_stable()
+                need_update = True
+            elif item == "enable-firmware":
+                enable_firmware_component()
+                need_update = True
+            elif item in RECOMMENDED_INSTALLS:
+                if need_update:
+                    run(["apt-get", "-q", "update"], timeout=900, env=env)
+                    need_update = False
+                if run(apt + ["install", RECOMMENDED_INSTALLS[item]], timeout=3600, env=env).returncode != 0:
+                    raise ToolError(f"installing {RECOMMENDED_INSTALLS[item]} failed")
+            done.append(item)
+        except (ToolError, OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(f"{item}: {exc}")
+    progress(95, msg("verify"))
+    save_health(scan_health(deep=False))
+    progress(100, msg("done"))
+    return {"fixed": done, "errors": errors, "refresh": need_update}
+
+
+# --------------------------------------------------------------------------
 # Kernels
 # --------------------------------------------------------------------------
 
@@ -1973,6 +2367,13 @@ def main(argv: list[str]) -> int:
     clean_u.add_argument("items", nargs="+")
     clean_s = sub.add_parser("clean-system")
     clean_s.add_argument("items", nargs="+")
+    health = sub.add_parser("health")
+    health.add_argument("--quick", action="store_true", help="skip verifying core package files")
+    health.add_argument("--save", action="store_true", help="also store the result for the notifier")
+    health_fix = sub.add_parser("health-fix")
+    health_fix.add_argument("items", nargs="+")
+    continuous = sub.add_parser("continuous-stable")
+    continuous.add_argument("--apply", action="store_true")
     log_parser = sub.add_parser("changelog")
     log_parser.add_argument("package")
     log_parser.add_argument("installed", nargs="?", default="")
@@ -2073,6 +2474,21 @@ def main(argv: list[str]) -> int:
             print(json.dumps(clean_user(args.items), indent=1))
         elif args.command == "clean-system":
             write_report("clean-system", clean_system(args.items))
+        elif args.command == "health":
+            data = scan_health(deep=not args.quick)
+            if args.save:
+                save_health(data)
+            print(json.dumps(data, indent=1))
+        elif args.command == "health-fix":
+            bad = [i for i in args.items if i not in HEALTH_FIXES]
+            if bad:
+                raise ToolError(f"Unknown fix: {bad[0]}")
+            write_report("health-fix", fix_health(args.items))
+        elif args.command == "continuous-stable":
+            if args.apply:
+                print(json.dumps(apply_continuous_stable(), indent=1))
+            else:
+                print(json.dumps(public(continuous_stable_plan()), indent=1))
         elif args.command == "changelog":
             print(changelog(args.package, args.installed))
         elif args.command == "kernel-plan":

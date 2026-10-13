@@ -1,6 +1,6 @@
 # Eduka-Update-System (EUS)
 
-![Version](https://img.shields.io/badge/version-0.15-17845b)
+![Version](https://img.shields.io/badge/version-0.16-17845b)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Platform](https://img.shields.io/badge/platform-Edukasaun%20OS%20%7C%20Debian-orange)
 
@@ -29,7 +29,48 @@ separate application.
 - Installation-only history with success/failure status and a clear action.
 - Automatic language selection from the session locale: English, Tetum,
   Portuguese, or Indonesian.
-- Version shown in **About**; the public version is exactly `0.15`.
+- Version shown in **About**; the public version is exactly `0.16`.
+
+### Added in 0.16: continuous stable, System Health, launcher-style window
+
+**Release policy.** Edukasaun OS follows Debian **`stable` without a
+codename** and is updated continuously; it never "switches distribution
+release". Installing EUS (package, `install.sh` or the Cubic installer)
+sets this up automatically:
+
+- `/etc/apt/apt.conf.d/52eduka-update-system` lets APT accept the archive's
+  Codename/Version change when Debian publishes a new stable release
+  (without it, `apt-get update` stops with "changed its 'Codename' value
+  from 'trixie' to 'forky'"). Origin/Label changes are still refused.
+- Debian repositories that name the *current* stable release by codename
+  (`trixie`, `trixie-updates`, `trixie-security`) are switched to `stable`,
+  `stable-updates`, `stable-security`, with a backup in `/var/backups/eus/`.
+  This only happens when the archive itself reports the codename as
+  `stable`; third-party repositories are never changed.
+- When `stable` moves to a new Debian release, EUS shows it as **one major
+  system update** ("Debian 14 \"forky\"") instead of hundreds of packages,
+  never installs it automatically, and installs it with the safe sequence:
+  Timeshift snapshot (if enabled) → `upgrade --without-new-pkgs` →
+  `full-upgrade` → clean-up. Terminal: `eduka-update-system --major-upgrade`.
+
+**System Health.** After every scheduled check (and on demand) EUS looks for
+damage and recommends repairs: interrupted package installations
+(`dpkg --configure -a`), broken dependencies (`apt-get --fix-broken
+install`), changed or missing files of core packages (`dpkg --verify` →
+reinstall), low disk space on `/`, `/boot`, `/var`, failed services,
+repositories with key problems or duplicates, codename-based Debian
+repositories, a newer kernel waiting for a restart, old kernels, held
+packages and a pending major update. It also recommends useful additions
+for the computer: CPU microcode, Timeshift, zram on low-memory machines,
+fwupd firmware updates on UEFI systems and the `non-free-firmware`
+component. A desktop notification appears when a new problem is found.
+Terminal: `--health`, `--repair`.
+
+**Window.** A launcher-style layout like Ubuntu Netbook Remix: categories on
+the left (Home, Updates, System Health, Maintenance, Software Sources,
+Settings; the selected one points into the panel), large flat icons with a
+soft depth in a rounded panel on the right, badges for pending updates and
+problems.
 
 ### Added in 0.15: compact interface, Mint-style smart updates, System Cleaner
 
@@ -160,7 +201,7 @@ a workflow artifact.
 Build the package from a checkout (needs only `dpkg-deb`):
 
 ```bash
-make deb          # -> dist/eduka-update-system_0.15_all.deb
+make deb          # -> dist/eduka-update-system_0.16_all.deb
 ```
 
 A prebuilt package is also kept in `releases/`. Copy it into the Cubic
@@ -168,7 +209,7 @@ chroot (drag it into the Cubic terminal window) and install it with APT so
 the dependencies are resolved:
 
 ```bash
-apt install ./eduka-update-system_0.15_all.deb
+apt install ./eduka-update-system_0.16_all.deb
 ```
 
 The package enables `eus-refresh.timer` and `eus-sources.path` without

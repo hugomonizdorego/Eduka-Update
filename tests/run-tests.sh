@@ -59,10 +59,11 @@ test -x "$TEST_DIR/root/usr/local/bin/eduka-update-system"
 test -x "$TEST_DIR/root/usr/local/libexec/eduka-update-system-gui"
 test -x "$TEST_DIR/root/usr/local/libexec/eduka-update-system-tool"
 test -r "$TEST_DIR/root/etc/systemd/system/eus-sources.path"
+grep -q 'AllowReleaseInfoChange::Codename "true"' "$TEST_DIR/root/etc/apt/apt.conf.d/52eduka-update-system"
 test -L "$TEST_DIR/root/usr/local/bin/eduka-upgrade-action.sh"
 test -r "$TEST_DIR/root/usr/share/applications/eduka-update-system.desktop"
 test -r "$TEST_DIR/root/etc/eus/version"
-grep -qx "VERSION='0.15'" "$TEST_DIR/root/etc/eus/version"
+grep -qx "VERSION='0.16'" "$TEST_DIR/root/etc/eus/version"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$PROJECT_DIR/data/applications/eduka-update-system.desktop"
