@@ -12,7 +12,9 @@
 set -Eeuo pipefail
 
 REPO='hugomonizdorego/Eduka-Update'
-ASSET='eduka-update-system_all.deb'
+# EUS 0.17 and later are compiled (Rust): one package per architecture.
+ARCH="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+ASSET="eduka-update-system_${ARCH}.deb"
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo 'Run as root (in Cubic the terminal is already root): sudo bash get-eus.sh' >&2
@@ -53,7 +55,7 @@ for url in "${candidates[@]}"; do
         break
     fi
 done
-[[ -n "$source_url" ]] || { echo 'ERROR: the package could not be downloaded.' >&2; exit 1; }
+[[ -n "$source_url" ]] || { echo "ERROR: the $ARCH package could not be downloaded (packages are published for amd64)." >&2; exit 1; }
 
 # Verify the checksum published next to the package when there is one.
 if download "${source_url%/*}/SHA256SUMS" "$WORK/SHA256SUMS" 2>/dev/null && \

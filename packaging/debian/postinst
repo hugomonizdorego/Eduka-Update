@@ -26,7 +26,7 @@ if [ "$1" = configure ]; then
     # Edukasaun OS release policy: Debian repositories that name the current
     # stable release by codename are switched to "stable" (backups in
     # /var/backups/eus). Third-party repositories are never changed.
-    /usr/bin/python3 -I /usr/local/libexec/eduka-update-system-tool continuous-stable --apply \
+    /usr/local/libexec/eduka-update-system-tool continuous-stable --apply \
         >>/var/log/eus/eus.log 2>&1 || true
 
     if [ -d /run/systemd/system ]; then
@@ -37,6 +37,9 @@ if [ "$1" = configure ]; then
     if [ -d /run/systemd/system ]; then
         systemctl restart eus-refresh.timer eus-sources.path >/dev/null 2>&1 || true
     fi
+
+    # EUS 0.17 is written in Rust: drop the Python indicator of older versions.
+    rm -f /usr/lib/EUS-ICONS/eus_panel_indicator.py
 
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true

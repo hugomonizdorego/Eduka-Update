@@ -387,7 +387,7 @@ export component KeyFixPage inherits ToolPage {
             Table {
                 rows: App.repo-overview;
                 headers: [Tr.t("rp_col_status"), Tr.t("rp_col_repo"), Tr.t("rp_col_suite"), Tr.t("rp_col_type"), Tr.t("rp_col_keyring")];
-                widths: [64px, 0px, 100px, 86px, 0px];
+                widths: [92px, 0px, 100px, 84px, 0px];
                 color-column: 0;
                 bold-color: true;
             }
@@ -756,6 +756,8 @@ export component AddKeyPage inherits ToolPage {
             Card {
                 height: 110px;
                 TextEdit {
+                    width: parent.width;
+                    height: parent.height;
                     read-only: true;
                     text: App.ak-preview;
                     font-size: Theme.font-small;
@@ -1059,6 +1061,8 @@ export component TextPage inherits ToolPage {
     Card {
         vertical-stretch: 1;
         TextEdit {
+            width: parent.width;
+            height: parent.height;
             read-only: true;
             text: root.text;
             wrap: no-wrap;

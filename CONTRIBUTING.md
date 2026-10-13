@@ -16,8 +16,9 @@ allow-listed by the backend and covered by the PolicyKit policy.
 
 ## Style
 
-- Python: four-space indentation, clear names, and no blocking package-manager
-  calls on the Qt UI thread.
+- Rust: `cargo fmt` style (100 columns are fine), no `unwrap()` on user
+  data, and no blocking package-manager or network calls on the Slint UI
+  thread (use `runner::background` or `runner::spawn`). Run `cargo test`.
 - Bash: `set -Eeuo pipefail`, quoted variables, explicit paths, and validated
   input for root operations.
 - Desktop integration: keep X11, Wayland, and LXQt behavior equivalent.

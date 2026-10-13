@@ -50,6 +50,7 @@ files=(
     /usr/local/libexec/eduka-update-system-gui
     /usr/local/libexec/eduka-update-system-root
     /usr/local/libexec/eduka-update-system-tool
+    /usr/local/libexec/eus-tray-indicator
     /etc/apt/apt.conf.d/52eduka-update-system
     /usr/lib/EUS-ICONS/eus_panel_indicator.py
     /usr/lib/EUS-ICONS/eus-i18n.json

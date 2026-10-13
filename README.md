@@ -1,16 +1,20 @@
 # Eduka-Update-System (EUS)
 
-![Version](https://img.shields.io/badge/version-0.16-17845b)
+![Version](https://img.shields.io/badge/version-0.17-17845b)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Platform](https://img.shields.io/badge/platform-Edukasaun%20OS%20%7C%20Debian-orange)
 
 Eduka-Update-System is the graphical update manager for Edukasaun OS. It
-presents APT and Flatpak updates in a Qt interface, classifies their risk,
+presents APT and Flatpak updates in a native interface, classifies their risk,
 manages kernels, repairs APT repository keys, integrates with Eduka-Panel,
 and performs privileged operations through PolicyKit.
 
-EUS is intentionally focused on software updates. System cleaning belongs to a
-separate application.
+All EUS programs are written in **Rust** (since 0.17): the window uses
+[Slint](https://slint.dev), the maintenance tool, the panel status writer and
+the tray icon are small native binaries, and only the privileged backend and
+the session notifier are Bash scripts. Python and Qt are no longer needed.
+
+![Home](docs/screenshots/home.png)
 
 ## Main features
 
@@ -19,8 +23,7 @@ separate application.
 - Package purpose, addressed problem, postponement risk, recommendation,
   installed version, new version, and download size.
 - Per-update progress bars with a formal completion state at 100%.
-- A resizable native LXQt window with minimize/maximize support, scrolling,
-  and X11/Wayland compatibility.
+- A resizable native window with scrolling and X11/Wayland compatibility.
 - A single-instance GUI: clicking the panel indicator raises the existing
   window instead of opening a duplicate.
 - Eduka-Panel indicator shown only when an update is available.
@@ -29,7 +32,48 @@ separate application.
 - Installation-only history with success/failure status and a clear action.
 - Automatic language selection from the session locale: English, Tetum,
   Portuguese, or Indonesian.
-- Version shown in **About**; the public version is exactly `0.16`.
+- Version shown in **About**; the public version is exactly `0.17`.
+
+### Added in 0.17: rewritten in Rust
+
+EUS moved from Python/PyQt6 to Rust for stability: no interpreter or Qt
+version can break it, errors are caught at compile time, and the programs
+start instantly.
+
+| Program | Path | Rust crate |
+| --- | --- | --- |
+| Update manager window | `/usr/local/libexec/eduka-update-system-gui` | `crates/eus-gui` (Slint, software renderer: works in VirtualBox and without 3D drivers) |
+| Maintenance tool (repositories, keys, releases, kernels, cleaner, health) | `/usr/local/libexec/eduka-update-system-tool` | `crates/eus-tool` on the shared library `crates/eus-core` |
+| Panel status writer | `/usr/local/bin/eus-panel-status` | `crates/eus-panel` |
+| Tray icon (StatusNotifierItem) | `/usr/local/libexec/eus-tray-indicator` | `crates/eus-panel` |
+
+- The window keeps the 0.16 launcher design; the tools (Cleaner, Kernels,
+  Key Fix, Add Repository, Add Key, Upgrade OS, Settings, History, Log) now
+  open as pages inside the panel instead of separate dialogs, and
+  confirmations appear over the window.
+- The maintenance tool keeps every subcommand, its JSON output and exit
+  codes, so the backend and scripts work unchanged. New text formats
+  (`health --format text|fixes`, `scan-clean --format text`,
+  `health-summary`) replace the small Python snippets the launcher used.
+- The window reads health, kernels, cleaner items, repositories and
+  changelogs directly through `eus-core` instead of starting a helper.
+- HTTP downloads honour `NO_PROXY`.
+- Fixed: a package whose source package has the same name (no `Source:`
+  field) lost its description, which was stored as its source package.
+- The package is now built per architecture: `eduka-update-system_0.17_amd64.deb`.
+
+| Updates | System Health |
+| --- | --- |
+| ![Updates](docs/screenshots/updates.png) | ![System Health](docs/screenshots/health.png) |
+| **Major system update** | **Key Fix** |
+| ![Major system update](docs/screenshots/major-update.png) | ![Key Fix](docs/screenshots/key-fix.png) |
+| **Kernels** | **System Cleaner** |
+| ![Kernels](docs/screenshots/kernels.png) | ![System Cleaner](docs/screenshots/cleaner.png) |
+| **Add Repository** | **Upgrade OS** |
+| ![Add Repository](docs/screenshots/add-repository.png) | ![Upgrade OS](docs/screenshots/upgrade-os.png) |
+
+All screenshots are in [docs/screenshots](docs/screenshots); regenerate them
+with `make screenshots`.
 
 ### Added in 0.16: continuous stable, System Health, launcher-style window
 
@@ -125,15 +169,23 @@ EUS window reloads by itself.
 ## Supported environment
 
 The primary target is Edukasaun OS on a Debian base with LXQt. EUS supports
-both X11 and Wayland Qt sessions. APT is required; Flatpak support is optional
-at runtime.
+X11 and Wayland sessions; the tray icon needs a StatusNotifierItem host (the
+LXQt panel's Status Notifier plugin). APT is required; Flatpak support is
+optional at runtime.
 
 ## Install from source
 
+Building needs Rust 1.92 or newer (Slint requires it; Debian 13's own
+`cargo` is older, so use [rustup](https://rustup.rs)) and the fontconfig
+headers. The prebuilt `.deb` needs none of this.
+
 ```bash
-git clone https://github.com/YOUR-ACCOUNT/eduka-update-system.git
-cd eduka-update-system
-sudo ./install.sh
+sudo apt install curl build-essential pkg-config libfontconfig-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # as your user
+git clone https://github.com/hugomonizdorego/Eduka-Update.git
+cd Eduka-Update
+make build            # cargo build --release
+sudo ./install.sh     # or: sudo ./install.sh --bindir DIR (prebuilt programs)
 ```
 
 Log out and back in after the first installation so LXQt starts the panel
@@ -175,7 +227,7 @@ wget -O /tmp/get-eus.sh https://raw.githubusercontent.com/hugomonizdorego/Eduka-
 bash /tmp/get-eus.sh
 ```
 
-The script downloads `eduka-update-system_all.deb` from the latest GitHub
+The script downloads `eduka-update-system_amd64.deb` from the latest GitHub
 release (or from `releases/` in the repository), checks it against
 `SHA256SUMS`, and installs it with APT so every dependency is installed too.
 To take the package from a branch or tag instead, run
@@ -185,9 +237,9 @@ Without the script:
 
 ```bash
 cd /tmp
-wget https://raw.githubusercontent.com/hugomonizdorego/Eduka-Update/main/releases/eduka-update-system_all.deb
+wget https://raw.githubusercontent.com/hugomonizdorego/Eduka-Update/main/releases/eduka-update-system_amd64.deb
 apt-get update
-apt install ./eduka-update-system_all.deb
+apt install ./eduka-update-system_amd64.deb
 eduka-update-system --version
 ```
 
@@ -198,10 +250,10 @@ a workflow artifact.
 
 ## Install the .deb package (recommended, also inside Cubic)
 
-Build the package from a checkout (needs only `dpkg-deb`):
+Build the package from a checkout (needs Rust and `dpkg-deb`):
 
 ```bash
-make deb          # -> dist/eduka-update-system_0.16_all.deb
+make deb          # -> dist/eduka-update-system_0.17_amd64.deb
 ```
 
 A prebuilt package is also kept in `releases/`. Copy it into the Cubic
@@ -209,7 +261,7 @@ chroot (drag it into the Cubic terminal window) and install it with APT so
 the dependencies are resolved:
 
 ```bash
-apt install ./eduka-update-system_0.16_all.deb
+apt install ./eduka-update-system_0.17_amd64.deb
 ```
 
 The package enables `eus-refresh.timer` and `eus-sources.path` without
@@ -219,15 +271,14 @@ Remove with `apt remove eduka-update-system` (or `apt purge` to also delete
 
 ## Install inside Cubic without the package
 
-The self-contained installer embeds the whole source tree:
+The self-contained installer embeds the programs and data files. It is
+published with every GitHub release, or build it with
+`make cubic-installer` (→ `dist/install-eduka-update-system-cubic.sh`):
 
 ```bash
-bash tools/install-eduka-update-system-cubic.sh            # with dependencies
-bash tools/install-eduka-update-system-cubic.sh --no-deps  # files only
+bash install-eduka-update-system-cubic.sh            # with dependencies
+bash install-eduka-update-system-cubic.sh --no-deps  # files only
 ```
-
-Regenerate it after changing the source with `make cubic-installer`
-(`make check` fails when it is stale).
 
 ## Remove
 
@@ -248,25 +299,32 @@ sudo ./uninstall.sh --purge
 make check
 ```
 
-The checks validate Bash and Python syntax, exercise the update-list parser,
-validate desktop files when the validator is installed, and stage a complete
-installation in a temporary directory without changing the host system.
+The checks validate the Bash scripts, run the Rust unit and integration tests
+(`cargo test`: duplicate repositories, APT diagnostics, keyring placement,
+automatic key discovery against a local HTTP mirror with real `gpg` keys,
+the OS upgrade and the continuous `stable` policy on a fake APT tree, kernel
+names, the cleaner and System Health), exercise the update-list parser and
+the panel status file, validate desktop files when the validator is
+installed, and stage a complete installation in a temporary directory
+without changing the host system.
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/gui/` | PyQt6 update-manager interface |
-| `src/backend/` | privileged APT/Flatpak backend and the repository/key/kernel helper |
+| `crates/eus-core/` | shared Rust library: sources, keyrings, releases, kernels, cleaner, health |
+| `crates/eus-tool/` | `eduka-update-system-tool` command line (used by the backend) |
+| `crates/eus-gui/` | Slint update-manager window (`ui/*.slint`, icons, translations) |
+| `crates/eus-panel/` | `eus-panel-status` and the `eus-tray-indicator` tray icon |
+| `src/backend/` | privileged APT/Flatpak backend (Bash, run through PolicyKit) |
 | `src/launcher/` | GUI launcher, watcher, notifications and restart reminders |
-| `src/integration/` | Eduka-Panel status and indicator processes |
 | `data/` | desktop, autostart, systemd and PolicyKit integration |
 | `assets/` | application and state icons plus translations |
 | `config/` | default EUS configuration |
-| `tools/` | self-contained Cubic installer and its generator |
+| `tools/` | `get-eus.sh`, the Cubic installer generator and the screenshot script |
 | `packaging/` | `.deb` builder and maintainer scripts |
 | `releases/` | prebuilt `.deb` package |
-| `tests/` | non-destructive source checks and fixtures |
+| `tests/` | non-destructive checks, sample update lists and screenshot fixtures |
 
 More details are in [Architecture](docs/ARCHITECTURE.md),
 [Eduka-Panel integration](docs/EDUKA-PANEL-INTEGRATION.md), and

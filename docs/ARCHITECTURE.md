@@ -1,17 +1,19 @@
 # Architecture
 
 EUS separates display, session integration, and privileged package management.
+Since 0.17 every program except the root backend and the session launcher is
+written in Rust (Cargo workspace in `crates/`).
 
 ## Components
 
 | Component | Installed location | Responsibility |
 | --- | --- | --- |
 | Launcher/watcher | `/usr/local/bin/eduka-update-system` | start or raise the GUI, check notifications, run the watcher, and remind about restart |
-| PyQt6 GUI | `/usr/local/libexec/eduka-update-system-gui` | display, select, describe, and sequence updates |
+| GUI (Rust, Slint) | `/usr/local/libexec/eduka-update-system-gui` | display, select, describe, and sequence updates; tool pages; reads health, kernels, cleaner items, repositories and changelogs through `eus-core` |
 | Root backend | `/usr/local/libexec/eduka-update-system-root` | refresh APT metadata, install validated selections, schedule/pause checks, kernels, key repair, clear history, and restart |
-| Maintenance helper | `/usr/local/libexec/eduka-update-system-tool` | parse APT sources and keyrings, detect duplicates and key errors, list kernels (read-only, unprivileged); repair keys/duplicates, add keys, plan kernel changes (only when called by the root backend) |
-| Panel status writer | `/usr/local/bin/eus-panel-status` | atomically publish panel state for the current user |
-| Panel indicator | `/usr/lib/EUS-ICONS/eus_panel_indicator.py` | show the tray icon only when updates exist and raise EUS when activated |
+| Maintenance tool (Rust) | `/usr/local/libexec/eduka-update-system-tool` | parse APT sources and keyrings, detect duplicates and key errors, list kernels (read-only, unprivileged); repair keys/duplicates, add keys, plan kernel changes (only when called by the root backend) |
+| Panel status writer (Rust) | `/usr/local/bin/eus-panel-status` | atomically publish panel state for the current user |
+| Tray icon (Rust) | `/usr/local/libexec/eus-tray-indicator` | StatusNotifierItem shown only when updates exist; raises EUS when activated |
 | Refresh timer | `eus-refresh.timer` | periodically refresh system update metadata (skipped while paused) |
 | Sources watcher | `eus-sources.path` | refresh after repositories or keys change, e.g. added in a terminal |
 
@@ -56,11 +58,22 @@ the GUI single-instance socket use the logged-in user's runtime directory.
 Package names and Flatpak references cross from an unprivileged GUI into the
 root backend. The backend validates the requested action and identifiers; the
 helper validates again (names, URIs, kernel plans simulated with `apt-get -s`)
-and is executed with `python3 -I` so the caller's environment cannot inject
-modules. Do
-not move this validation into the GUI, because the GUI is outside the trust
-boundary.
+and is a compiled program, so the caller's environment cannot inject code
+into it. Do not move this validation into the GUI, because the GUI is outside
+the trust boundary.
 
+
+## Rust workspace
+
+| Crate | Builds | Contents |
+| --- | --- | --- |
+| `eus-core` | library | `sources` (list/deb822 parsing, duplicates, Signed-By), `apt` (update diagnostics, HTTP, Release files), `keys` (gpg, placement, key search, Key Fix, Add Key/Repo), `release` (Upgrade OS, continuous stable), `kernels`, `cleaner`, `health`, `repos`, `util` |
+| `eus-tool` | `eduka-update-system-tool` | clap command line over `eus-core`; JSON output, exit 2 on errors, 3 on timeouts or a blocked plan |
+| `eus-gui` | `eduka-update-system-gui` | Slint window (`ui/`), controller (`src/app.rs`, `src/tools.rs`), process runner with the progress protocol, single instance |
+| `eus-panel` | `eus-panel-status`, `eus-tray-indicator` | panel state file and the `ksni` StatusNotifierItem |
+
+`EUS_APT_ROOT` moves every system path below a test directory; the
+integration tests in `crates/eus-core/tests` use it with a local HTTP mirror.
 
 ## Keyring placement
 

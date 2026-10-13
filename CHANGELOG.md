@@ -3,6 +3,40 @@
 All notable changes to Eduka-Update-System are documented here. The project
 uses a single public version number without a build suffix.
 
+## 0.17 — 2026-10-13
+
+### Changed
+
+- EUS is written in Rust. The update manager window uses Slint (software
+  renderer, so it also works in VirtualBox and without 3D drivers), and the
+  maintenance tool, the panel status writer and the tray icon are native
+  programs. Python, PyQt6 and Qt are no longer dependencies; only the
+  privileged backend and the session launcher remain Bash scripts.
+- The window keeps the 0.16 launcher design. Cleaner, Kernels, Key Fix, Add
+  Repository, Add Key, Upgrade OS, Settings, History and Log open as pages
+  inside the panel; confirmations appear over the window.
+- `eduka-update-system-tool` keeps all subcommands, JSON output and exit
+  codes. New: `health --format text|fixes`, `scan-clean --format text` and
+  `health-summary`, used by the launcher instead of Python snippets.
+- The tray icon is a StatusNotifierItem (`/usr/local/libexec/eus-tray-indicator`).
+  Eduka-Panel reads `panel-status.json`; the Python module
+  `eus_panel_indicator.py` was removed.
+- The package is architecture-specific: `eduka-update-system_0.17_amd64.deb`
+  (`releases/eduka-update-system_amd64.deb`, used by `tools/get-eus.sh`).
+- The self-contained Cubic installer is built by `make cubic-installer` and
+  published with each GitHub release instead of being kept in the
+  repository.
+- Tests are Rust integration tests (`cargo test`) with a fake APT tree, a
+  local HTTP mirror and real `gpg` keys; English screenshots of every page
+  are made with `make screenshots`.
+
+### Fixed
+
+- A package without a `Source:` field (source and binary name are equal)
+  had its description stored as its source package, because Bash `read`
+  merges empty tab-separated fields.
+- HTTP downloads (key search, release check) honour `NO_PROXY`.
+
 ## 0.16 — 2026-10-13
 
 ### Changed

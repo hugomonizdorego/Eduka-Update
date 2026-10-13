@@ -16,8 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils gnupg
+      - name: Install build and test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils gnupg pkg-config \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check sources
         run: make check
@@ -25,12 +32,15 @@ jobs:
       - name: Build package
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
+          arch="$(dpkg --print-architecture)"
           mkdir -p out
+          cargo build --release --locked
           ./packaging/build-deb.sh out
-          cp "out/eduka-update-system_${version}_all.deb" out/eduka-update-system_all.deb
-          (cd out && sha256sum *.deb > SHA256SUMS)
+          cp "out/eduka-update-system_${version}_${arch}.deb" "out/eduka-update-system_${arch}.deb"
+          ./tools/build-cubic-installer.sh out/install-eduka-update-system-cubic.sh
+          (cd out && sha256sum *.deb *.sh > SHA256SUMS)
           cat out/SHA256SUMS
-          dpkg-deb --info "out/eduka-update-system_${version}_all.deb"
+          dpkg-deb --info "out/eduka-update-system_${version}_${arch}.deb"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -47,6 +57,6 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} does not match VERSION ${version}" >&2
             exit 1
           fi
-          gh release create "${GITHUB_REF_NAME}" out/*.deb out/SHA256SUMS \
+          gh release create "${GITHUB_REF_NAME}" out/*.deb out/*.sh out/SHA256SUMS \
             --title "Eduka-Update-System ${version}" \
-            --notes "Install in the Cubic terminal: \`apt install ./eduka-update-system_${version}_all.deb\` or run tools/get-eus.sh. See CHANGELOG.md."
+            --notes "Install in the Cubic terminal: \`apt install ./eduka-update-system_${version}_amd64.deb\` or run tools/get-eus.sh. See CHANGELOG.md."

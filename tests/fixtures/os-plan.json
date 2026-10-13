@@ -1,0 +1,7 @@
+{"current": "trixie", "target": "forky", "blocking": [], "entries": [
+ {"file": "/etc/apt/sources.list", "line": 1, "uri": "http://deb.debian.org/debian", "suite": "trixie", "new_suite": "forky", "role": "debian", "action": "switch"},
+ {"file": "/etc/apt/sources.list", "line": 2, "uri": "http://deb.debian.org/debian", "suite": "trixie-updates", "new_suite": "forky-updates", "role": "debian", "action": "switch"},
+ {"file": "/etc/apt/sources.list", "line": 3, "uri": "http://security.debian.org/debian-security", "suite": "trixie-security", "new_suite": "forky-security", "role": "debian-security", "action": "switch"},
+ {"file": "/etc/apt/sources.list.d/edukasaun.sources", "line": 2, "uri": "https://repo.edukasaunos.tl/debian", "suite": "trixie", "new_suite": "forky", "role": "edukasaun", "action": "switch"},
+ {"file": "/etc/apt/sources.list.d/vendor-tools.list", "line": 1, "uri": "https://apt.vendor.example/debian", "suite": "trixie", "new_suite": "forky", "role": "third-party", "action": "keep", "note": "third-party repository has no 'forky' suite; left on 'trixie'"},
+ {"file": "/etc/apt/sources.list.d/browser.list", "line": 1, "uri": "https://packages.browser.example/apt", "suite": "stable", "new_suite": "", "role": "third-party", "action": "unchanged"}]}

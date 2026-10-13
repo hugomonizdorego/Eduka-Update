@@ -5,9 +5,8 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.16'
+VERSION='0.17'
 GUI='/usr/local/libexec/eduka-update-system-gui'
-PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
 STATE_FILE='/var/lib/eus/status'
 RESTART_FILE='/var/lib/eus/restart-required'
@@ -179,7 +178,7 @@ launch_gui_detached() {
 
 launch_gui() {
     # Optional arguments are passed to the GUI, e.g. --open kernel.
-    local state_dir log_file attempt_log preferred_platform rc
+    local state_dir log_file attempt_log rc
     if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
         terminal_update
         return
@@ -187,42 +186,25 @@ launch_gui() {
     state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/eus"
     log_file="$state_dir/gui-launch.log"
     mkdir -p "$state_dir"
-    preferred_platform="${QT_QPA_PLATFORM:-}"
-    if [[ -z "$preferred_platform" && -n "${WAYLAND_DISPLAY:-}" && \
-          "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-        preferred_platform='wayland'
-    fi
     {
         printf '\n[%s] Launching EUS %s\n' "$(date --iso-8601=seconds)" "$VERSION"
-        printf 'DISPLAY=%s WAYLAND_DISPLAY=%s QT_QPA_PLATFORM=%s\n' \
-            "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}" "${preferred_platform:-auto}"
+        printf 'DISPLAY=%s WAYLAND_DISPLAY=%s\n' "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}"
     } >>"$log_file"
-    if [[ ! -x "$GUI" || ! -x "$PYTHON" ]]; then
-        printf 'Missing GUI executable or Python interpreter.\n' >>"$log_file"
-        command -v notify-send >/dev/null 2>&1 && notify-send --urgency=critical \
-            --icon="$EUS_ICON_AVAILABLE" "$APP_NAME" "$GUI_ERROR"
-        return 70
-    fi
-    if ! "$PYTHON" -c 'from PyQt6.QtWidgets import QApplication' >>"$log_file" 2>&1; then
-        printf 'PyQt6 import failed.\n' >>"$log_file"
+    if [[ ! -x "$GUI" ]]; then
+        printf 'Missing GUI executable %s.\n' "$GUI" >>"$log_file"
         command -v notify-send >/dev/null 2>&1 && notify-send --urgency=critical \
             --icon="$EUS_ICON_AVAILABLE" "$APP_NAME" "$GUI_ERROR"
         return 70
     fi
     attempt_log="$(mktemp "$state_dir/gui-attempt.XXXXXX")" || return 70
-    if [[ -n "$preferred_platform" ]]; then
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM="$preferred_platform" \
-            "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
-    else
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
-    fi
+    "$GUI" "$@" >"$attempt_log" 2>&1
     rc=$?
     cat "$attempt_log" >>"$log_file"
-    if [[ "$rc" -ne 0 && -n "${DISPLAY:-}" && "$preferred_platform" != xcb ]] && \
-       grep -Eqi 'qt\.qpa|platform plugin|could not connect to display' "$attempt_log"; then
-        printf '[%s] Retrying with Qt XCB platform.\n' "$(date --iso-8601=seconds)" >>"$log_file"
+    if [[ "$rc" -ne 0 && -n "${WAYLAND_DISPLAY:-}" && -n "${DISPLAY:-}" ]]; then
+        # Some compositors refuse the window: retry through XWayland.
+        printf '[%s] Retrying through X11.\n' "$(date --iso-8601=seconds)" >>"$log_file"
         : >"$attempt_log"
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM=xcb "$PYTHON" "$GUI" "$@" >"$attempt_log" 2>&1
+        env -u WAYLAND_DISPLAY "$GUI" "$@" >"$attempt_log" 2>&1
         rc=$?
         cat "$attempt_log" >>"$log_file"
     fi
@@ -316,7 +298,7 @@ terminal_add_key() {
 terminal_remove_old_kernels() {
     local answer
     local -a releases=()
-    mapfile -t releases < <("$PYTHON" -I "$TOOL" kernels --format old | sed '/^$/d')
+    mapfile -t releases < <("$TOOL" kernels --format old | sed '/^$/d')
     if ((${#releases[@]} == 0)); then
         printf 'No old kernel is installed.\n'
         return 0
@@ -552,7 +534,7 @@ send_old_kernel_notification() {
     [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$boot" ]] && return 0
     mkdir -p "$cache_dir"
     printf '%s\n' "$boot" >"$stamp_file"
-    count="$("$PYTHON" -I "$TOOL" kernels --format old 2>/dev/null | grep -c . || true)"
+    count="$("$TOOL" kernels --format old 2>/dev/null | grep -c . || true)"
     [[ "$count" =~ ^[0-9]+$ ]] && ((count > 0)) || return 0
     if notify-send --help 2>&1 | grep -q -- '--action'; then
         (
@@ -626,11 +608,7 @@ send_health_notification() {
     [[ -r "$HEALTH_FILE" ]] || return 0
     eus_gui_is_running && return 0
     local summary cache_dir stamp_file hash
-    summary="$("$PYTHON" -I -c 'import json, sys
-data = json.load(open(sys.argv[1]))
-items = [f for f in data.get("findings", []) if f.get("severity") in ("critical", "warning")]
-print("|".join(sorted(f["id"] for f in items)))
-print(items[0]["title"] if items else "")' "$HEALTH_FILE" 2>/dev/null)" || return 0
+    summary="$("$TOOL" health-summary 2>/dev/null)" || return 0
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
     stamp_file="$cache_dir/health-notified"
     mkdir -p "$cache_dir"
@@ -683,7 +661,7 @@ terminal_os_upgrade() {
         return 0
     fi
     printf '%s can move to Debian %s "%s".\n\nRepository plan:\n' "$OS_NAME" "$OS_TARGET_VERSION" "$OS_TARGET"
-    "$PYTHON" -I "$TOOL" os-plan --target "$OS_TARGET" --format text || return 1
+    "$TOOL" os-plan --target "$OS_TARGET" --format text || return 1
     local answer
     read -r -p 'Start the OS upgrade now? This can take a long time. [y/N] ' answer
     case "${answer,,}" in y|yes|s|sim|sin|i|iya|ya) ;; *) return 0 ;; esac
@@ -729,7 +707,7 @@ case "$command_name" in
     --fix-keys) invoke_root_terminal fix-keys ;;
     --fix-duplicates) invoke_root_terminal fix-duplicates ;;
     --add-key) terminal_add_key "$@" ;;
-    --list-kernels) "$PYTHON" -I "$TOOL" kernels --format text ;;
+    --list-kernels) "$TOOL" kernels --format text ;;
     --install-kernel)
         (($#)) || { usage >&2; exit 64; }
         invoke_root_terminal kernel-install "$@"
@@ -750,22 +728,10 @@ case "$command_name" in
         ;;
     --upgrade-os) terminal_os_upgrade ;;
     --health)
-        "$PYTHON" -I "$TOOL" health | "$PYTHON" -I -c 'import json, sys
-data = json.load(sys.stdin)
-for f in data["findings"] + data["recommendations"]:
-    fix = " -> fix: " + f["fix"] if f["fix"] else ""
-    print("[%-9s] %s%s" % (f["severity"], f["title"], fix))
-    if f["detail"]:
-        print("            " + f["detail"])
-if not data["findings"]:
-    print("No problem found.")'
+        "$TOOL" health --format text
         ;;
     --repair)
-        mapfile -t fixes < <("$PYTHON" -I "$TOOL" health | "$PYTHON" -I -c 'import json, sys
-data = json.load(sys.stdin)
-for f in data["findings"]:
-    if f["fix"]:
-        print(f["fix"])')
+        mapfile -t fixes < <("$TOOL" health --format fixes)
         if ((${#fixes[@]} == 0)); then
             printf 'No repair is needed.\n'
         else
@@ -774,9 +740,7 @@ for f in data["findings"]:
         ;;
     --major-upgrade) invoke_root_terminal major-upgrade ;;
     --clean)
-        "$PYTHON" -I "$TOOL" scan-clean --scope system | "$PYTHON" -c 'import json, sys
-for item in json.load(sys.stdin):
-    print("  %-11s %8.1f MB  %s" % (item["id"], item["size"] / 1048576, item["title"]))'
+        "$TOOL" scan-clean --scope system --format text
         invoke_root_terminal clean autoremove configs apt-cache logs crash
         ;;
     --pause)

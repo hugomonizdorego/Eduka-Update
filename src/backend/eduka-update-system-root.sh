@@ -1,5 +1,5 @@
 #!/bin/bash
-# Privileged helper for Eduka-Update-System 0.16. Do not launch directly.
+# Privileged helper for Eduka-Update-System 0.17. Do not launch directly.
 # It is the only program PolicyKit allows EUS to run as root.
 
 set -u
@@ -21,7 +21,6 @@ SCHEDULE_FILE='/etc/eus/schedule'
 PAUSE_FILE='/etc/eus/pause'
 TIMER_OVERRIDE='/etc/systemd/system/eus-refresh.timer.d/override.conf'
 TOOL='/usr/local/libexec/eduka-update-system-tool'
-PYTHON='/usr/bin/python3'
 IGNORE_FILE='/etc/eus/ignored-updates'
 # Defaults; /etc/eus/eus.conf overrides them.
 AUTO_CLEAN=1
@@ -305,10 +304,10 @@ timeshift_snapshot() {
 post_clean() {
     # After installing or removing packages, leave the system clean:
     # unneeded dependencies, leftover configuration and downloaded .debs.
-    [[ "${AUTO_CLEAN:-1}" == 1 && -x "$PYTHON" && -r "$TOOL" ]] || return 0
+    [[ "${AUTO_CLEAN:-1}" == 1 && -x "$TOOL" ]] || return 0
     progress 95 "$P_CLEAN"
     log_header 'Automatic clean-up after the operation'
-    "$PYTHON" -I "$TOOL" clean-system autoremove configs apt-cache >>"$LOG_FILE" 2>&1 || true
+    "$TOOL" clean-system autoremove configs apt-cache >>"$LOG_FILE" 2>&1 || true
 }
 
 is_medium_package() {
@@ -529,8 +528,8 @@ apt_update_command() {
 }
 
 apt_has_key_problems() {
-    [[ -r "$APT_UPDATE_LOG" && -x "$PYTHON" && -r "$TOOL" ]] || return 1
-    "$PYTHON" -I "$TOOL" apt-problems --check >/dev/null 2>&1
+    [[ -r "$APT_UPDATE_LOG" && -x "$TOOL" ]] || return 1
+    "$TOOL" apt-problems --check >/dev/null 2>&1
 }
 
 apt_update_or_fail() {
@@ -548,8 +547,8 @@ apt_update_or_fail() {
 
 os_check() {
     # Network check for a new Debian stable base; never fails the caller.
-    [[ -x "$PYTHON" && -r "$TOOL" ]] || return 0
-    timeout 90 "$PYTHON" -I "$TOOL" os-check >/dev/null 2>>"$LOG_FILE" || true
+    [[ -x "$TOOL" ]] || return 0
+    timeout 90 "$TOOL" os-check >/dev/null 2>>"$LOG_FILE" || true
 }
 
 refresh_lists() {
@@ -567,8 +566,8 @@ refresh_lists() {
 
 health_check() {
     # Stored for the notifier and the GUI; never fails the caller.
-    [[ -x "$PYTHON" && -r "$TOOL" ]] || return 0
-    timeout 300 "$PYTHON" -I "$TOOL" health --save >/dev/null 2>>"$LOG_FILE" || true
+    [[ -x "$TOOL" ]] || return 0
+    timeout 300 "$TOOL" health --save >/dev/null 2>>"$LOG_FILE" || true
 }
 
 major_update_pending() {
@@ -962,11 +961,11 @@ clean_system() {
 }
 
 run_tool() {
-    # Run the Python maintenance helper; its stdout is the progress protocol.
+    # Run the maintenance helper (Rust); its stdout is the progress protocol.
     local errors rc message
-    [[ -x "$PYTHON" && -r "$TOOL" ]] || fail 'The EUS maintenance helper is missing.'
+    [[ -x "$TOOL" ]] || fail 'The EUS maintenance helper is missing.'
     errors="$(mktemp)"
-    "$PYTHON" -I "$TOOL" --lang "$LOCALE_CODE" "$@" 2>"$errors" | tee -a "$LOG_FILE"
+    "$TOOL" --lang "$LOCALE_CODE" "$@" 2>"$errors" | tee -a "$LOG_FILE"
     rc="${PIPESTATUS[0]}"
     if ((rc != 0)); then
         message="$(tail -n 3 "$errors" | tr '\n' ' ')"
@@ -1066,7 +1065,7 @@ os_upgrade() {
 
     # Validate the repository plan before changing anything on the system.
     errors="$(mktemp)"
-    plan="$("$PYTHON" -I "$TOOL" os-plan --target "$target" --format text 2>"$errors")" || {
+    plan="$("$TOOL" os-plan --target "$target" --format text 2>"$errors")" || {
         local message; message="$(tr '\n' ' ' <"$errors")$(grep -i blocked <<<"$plan")"; rm -f -- "$errors"
         fail "${message:-The OS upgrade plan could not be prepared.}"
     }
@@ -1082,15 +1081,15 @@ os_upgrade() {
 
     progress 26 "$P_OS_SWITCH"
     errors="$(mktemp)"
-    backup="$("$PYTHON" -I "$TOOL" os-switch "$target" 2>"$errors")" || {
+    backup="$("$TOOL" os-switch "$target" 2>"$errors")" || {
         local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
         fail "${message:-The repositories could not be switched.}"
     }
     rm -f -- "$errors"
     log_header "Repositories switched to $target; backup in $backup"
-    if ! apt_update_command || "$PYTHON" -I "$TOOL" apt-problems --check --keys-only; then
+    if ! apt_update_command || "$TOOL" apt-problems --check --keys-only; then
         # Never continue on half-working lists: restore the previous sources.
-        "$PYTHON" -I "$TOOL" os-restore "$backup" >>"$LOG_FILE" 2>&1 || true
+        "$TOOL" os-restore "$backup" >>"$LOG_FILE" 2>&1 || true
         apt_update_command || true
         fail "The new release repositories could not be loaded; the previous repositories were restored. See /var/log/eus/eus.log."
     fi
@@ -1124,7 +1123,7 @@ kernel_install() {
     apt_update_or_fail
     progress 20 "$P_KERNEL_INSTALL"
     errors="$(mktemp)"
-    plan="$("$PYTHON" -I "$TOOL" kernel-plan install "${tool_args[@]}" 2>"$errors")" || {
+    plan="$("$TOOL" kernel-plan install "${tool_args[@]}" 2>"$errors")" || {
         local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
         fail "${message:-The kernel request was refused.}"
     }
@@ -1150,7 +1149,7 @@ kernel_remove() {
     log_header "Kernel removal requested: ${EXTRA_ARGS[*]}"
     progress 10 "$P_KERNEL_REMOVE"
     errors="$(mktemp)"
-    plan="$("$PYTHON" -I "$TOOL" kernel-plan remove "${EXTRA_ARGS[@]}" 2>"$errors")" || {
+    plan="$("$TOOL" kernel-plan remove "${EXTRA_ARGS[@]}" 2>"$errors")" || {
         local message; message="$(tr '\n' ' ' <"$errors")"; rm -f -- "$errors"
         fail "${message:-The kernel removal was refused.}"
     }

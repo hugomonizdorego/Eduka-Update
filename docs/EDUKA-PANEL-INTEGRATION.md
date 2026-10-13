@@ -1,7 +1,19 @@
 # Eduka-Panel integration
 
-The panel indicator is a session process started by
-`eduka-update-system-indicator.desktop`.
+The tray icon `/usr/local/libexec/eus-tray-indicator` (Rust,
+StatusNotifierItem) is a session process started by
+`eduka-update-system-indicator.desktop`. It runs once per session.
+
+Eduka-Panel can also show the state itself: it is published in
+`$XDG_RUNTIME_DIR/eduka-update-system/panel-status.json`
+
+```json
+{"version":1,"state":"available","count":5,"progress":-1,"message":"","updated_at":1791900000}
+```
+
+with the icons, `eus-icons.json` and the translations `eus-i18n.json` in
+`/usr/lib/EUS-ICONS`. The Python widget module `eus_panel_indicator.py` of
+EUS 0.16 and older no longer exists; read the state file instead.
 
 ## Visibility rules
 

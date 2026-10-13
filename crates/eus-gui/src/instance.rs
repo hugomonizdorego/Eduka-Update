@@ -47,6 +47,11 @@ where
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    // The launcher and notifier look for gui.pid to know a window is open.
+    let temporary = dir.join(format!("gui.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, format!("{}\n", std::process::id()))?;
+    std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::rename(&temporary, dir.join("gui.pid"))?;
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
@@ -61,5 +66,9 @@ where
 }
 
 pub fn cleanup() {
-    let _ = std::fs::remove_file(socket_path());
+    let pid_file = runtime_dir().join("gui.pid");
+    if std::fs::read_to_string(&pid_file).is_ok_and(|p| p.trim() == std::process::id().to_string()) {
+        let _ = std::fs::remove_file(pid_file);
+        let _ = std::fs::remove_file(socket_path());
+    }
 }
