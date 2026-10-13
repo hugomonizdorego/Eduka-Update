@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/eus-core", "crates/eus-tool", "crates/eus-gui"]
+members = ["crates/eus-core", "crates/eus-tool", "crates/eus-gui", "crates/eus-panel"]
 
 [workspace.package]
 version = "0.17.0"
