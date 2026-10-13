@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/eus-core", "crates/eus-tool"]
+
+[workspace.package]
+version = "0.17.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["Edukasaun OS contributors"]
+rust-version = "1.82"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+glob = "0.3"
+tempfile = "3"
+wait-timeout = "0.2"
+libc = "0.2"
+ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "unwind"
