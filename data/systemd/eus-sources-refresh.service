@@ -1,0 +1,15 @@
+[Unit]
+Description=Refresh Eduka-Update-System after APT repositories changed
+After=network-online.target
+Wants=network-online.target
+# Several files are usually written in a burst; never loop on our own edits.
+StartLimitIntervalSec=10min
+StartLimitBurst=6
+
+[Service]
+Type=oneshot
+# Let the terminal command finish writing its repository and key files.
+ExecStartPre=/bin/sleep 20
+ExecStart=/usr/local/libexec/eduka-update-system-root sources-refresh en
+Nice=10
+IOSchedulingClass=idle

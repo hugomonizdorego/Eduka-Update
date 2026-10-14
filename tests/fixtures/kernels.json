@@ -1,0 +1,9 @@
+{"running": "6.12.38+deb13-amd64", "flavour": "amd64", "old_count": 2, "headers_installed": true,
+ "installed": [
+  {"release": "6.12.41+deb13-amd64", "package": "linux-image-6.12.41+deb13-amd64", "version": "6.12.41-1", "state": "newer", "size_kb": 412000, "packages": []},
+  {"release": "6.12.38+deb13-amd64", "package": "linux-image-6.12.38+deb13-amd64", "version": "6.12.38-1", "state": "running", "size_kb": 410000, "packages": []},
+  {"release": "6.12.33+deb13-amd64", "package": "linux-image-6.12.33+deb13-amd64", "version": "6.12.33-1", "state": "old", "size_kb": 409000, "packages": []},
+  {"release": "6.12.27+deb13-amd64", "package": "linux-image-6.12.27+deb13-amd64", "version": "6.12.27-1", "state": "old", "size_kb": 405000, "packages": []}],
+ "available": [
+  {"package": "linux-image-amd64", "release": "", "version": "6.12.41-1", "meta": true, "size": 1500},
+  {"package": "linux-image-6.12.43+deb13-amd64", "release": "6.12.43+deb13-amd64", "version": "6.12.43-1", "meta": false, "size": 104857600}]}

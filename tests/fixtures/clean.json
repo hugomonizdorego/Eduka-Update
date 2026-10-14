@@ -1,0 +1,9 @@
+[{"id":"apt-cache","title":"Downloaded package files (APT cache)","scope":"system","size":412000000,"detail":"236 files in /var/cache/apt/archives","default":true},
+ {"id":"autoremove","title":"Packages that are no longer needed","scope":"system","size":98500000,"detail":"libllvm18, libwebkit2gtk-4.0-37, gir1.2-webkit2-4.0","default":true},
+ {"id":"configs","title":"Leftover configuration of removed packages","scope":"system","size":0,"detail":"cups-browsed, popularity-contest","default":true},
+ {"id":"old-kernels","title":"Old kernels (the running kernel is kept)","scope":"system","size":524000000,"detail":"6.12.38+deb13-amd64, 6.12.33+deb13-amd64","default":true},
+ {"id":"logs","title":"Old rotated log files","scope":"system","size":31000000,"detail":"84 files in /var/log","default":true},
+ {"id":"journal","title":"System journal older than 2 weeks","scope":"system","size":402000000,"detail":"journalctl --vacuum-time=2weeks","default":false},
+ {"id":"thumbnails","title":"Thumbnail cache","scope":"user","size":58000000,"detail":"/home/student/.cache/thumbnails","default":true},
+ {"id":"firefox","title":"Firefox cache","scope":"user","size":265000000,"detail":"/home/student/.cache/mozilla/firefox/abcd.default-esr/cache2","default":true},
+ {"id":"trash","title":"Trash","scope":"user","size":120000000,"detail":"/home/student/.local/share/Trash/files","default":false}]

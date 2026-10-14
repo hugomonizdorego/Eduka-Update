@@ -9,8 +9,12 @@ EUS follows the active system/session locale automatically.
 | `id`, `in` | Indonesian |
 | other | English |
 
-Core GUI strings are defined in the Python GUI and shell components. Shared
-icon/indicator strings are stored in `assets/eus-icons/eus-i18n.json`.
+GUI strings are in `crates/eus-gui/src/messages.json` (one table per
+language, `{name}` placeholders; a missing entry falls back to English).
+Progress messages of the maintenance tool are in
+`crates/eus-core/src/i18n.rs`, notifier texts in the launcher script, and
+the tray icon strings in `assets/eus-icons/eus-i18n.json`. `cargo test`
+checks that every translated key exists in English.
 
 When adding a user-visible string:
 

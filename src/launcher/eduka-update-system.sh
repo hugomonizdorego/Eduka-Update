@@ -5,13 +5,30 @@ set -u
 export PATH='/usr/local/bin:/usr/bin:/bin'
 
 APP_NAME='Eduka-Update-System'
-VERSION='0.12'
+VERSION='0.17'
 GUI='/usr/local/libexec/eduka-update-system-gui'
-PYTHON='/usr/bin/python3'
 ROOT_HELPER='/usr/local/libexec/eduka-update-system-root'
 STATE_FILE='/var/lib/eus/status'
 RESTART_FILE='/var/lib/eus/restart-required'
 TSV_FILE='/var/lib/eus/updates.tsv'
+PAUSE_FILE='/etc/eus/pause'
+TOOL='/usr/local/libexec/eduka-update-system-tool'
+OS_UPGRADE_FILE='/var/lib/eus/os-upgrade'
+APT_UPDATE_LOG='/var/lib/eus/apt-update.log'
+# Notification texts added in 0.14 (English).
+OS_UPGRADE_TITLE='Upgrade OS available'
+OS_UPGRADE_BODY='%s can move to the new Debian %s "%s" base. Open Upgrade OS to see which repositories will change.'
+OPEN_UPGRADE='Open Upgrade OS'
+KEY_TITLE='A repository needs a GPG key'
+KEY_BODY='%s repository signing key(s) are missing, so those repositories are ignored. Key Fix can find and install them automatically.'
+OPEN_KEYFIX='Open Key Fix'
+MAJOR_TITLE='Major system update available'
+MAJOR_BODY='Debian %s "%s" is the new stable base of %s. Open the Update Manager to install it safely.'
+OPEN_UPDATES='Open Update Manager'
+HEALTH_TITLE='System problem found'
+HEALTH_BODY='%s. The Update Manager can repair it.'
+OPEN_HEALTH='Open System Health'
+HEALTH_FILE='/var/lib/eus/health.json'
 CONFIG_FILE='/etc/eus/eus.conf'
 VERSION_FILE='/etc/eus/version'
 CHECK_INTERVAL_SECONDS=60
@@ -48,6 +65,8 @@ load_messages() {
             RESTART_TITLE='Presiza hahu fali sistema'
             RESTART_BODY='Atualizasaun importante instala ona. Rai servisu hotu no hahu fali sistema atu aplika mudansa.'
             RESTART_NOW='Hahu Fali Agora'
+            OLD_KERNEL_BODY='Kernel foun la'"'"'o hela. Kernel tuan %s bele hasai ho seguru iha EUS → Kernel.'
+            OPEN_KERNEL='Jere Kernel'
             GUI_ERROR='EUS la bele loke. Haree log iha ~/.local/state/eus/gui-launch.log.'
             ;;
         pt)
@@ -61,6 +80,8 @@ load_messages() {
             RESTART_TITLE='E necessario reiniciar o sistema'
             RESTART_BODY='Foram instaladas atualizacoes importantes. Salve o trabalho e reinicie para aplicar as alteracoes.'
             RESTART_NOW='Reiniciar agora'
+            OLD_KERNEL_BODY='O kernel novo esta em uso. %s kernel(s) antigo(s) pode(m) ser removido(s) com seguranca em EUS → Kernel.'
+            OPEN_KERNEL='Gerir Kernels'
             GUI_ERROR='Nao foi possivel abrir o EUS. Consulte ~/.local/state/eus/gui-launch.log.'
             ;;
         id)
@@ -74,6 +95,8 @@ load_messages() {
             RESTART_TITLE='Sistem perlu dimulai ulang'
             RESTART_BODY='Pembaruan penting telah dipasang. Simpan pekerjaan lalu mulai ulang untuk menerapkan perubahan.'
             RESTART_NOW='Mulai Ulang Sekarang'
+            OLD_KERNEL_BODY='Kernel baru sudah dipakai. %s kernel lama dapat dihapus dengan aman di EUS → Kernel.'
+            OPEN_KERNEL='Kelola Kernel'
             GUI_ERROR='EUS tidak dapat dibuka. Periksa ~/.local/state/eus/gui-launch.log.'
             ;;
         *)
@@ -87,6 +110,8 @@ load_messages() {
             RESTART_TITLE='System restart required'
             RESTART_BODY='Important updates were installed. Save your work and restart to apply the changes.'
             RESTART_NOW='Restart Now'
+            OLD_KERNEL_BODY='The new kernel is in use. %s old kernel(s) can be removed safely in EUS → Kernel.'
+            OPEN_KERNEL='Manage Kernels'
             GUI_ERROR='EUS could not be opened. Check ~/.local/state/eus/gui-launch.log.'
             ;;
     esac
@@ -152,7 +177,8 @@ launch_gui_detached() {
 }
 
 launch_gui() {
-    local state_dir log_file attempt_log preferred_platform rc
+    # Optional arguments are passed to the GUI, e.g. --open kernel.
+    local state_dir log_file attempt_log rc
     if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
         terminal_update
         return
@@ -160,42 +186,25 @@ launch_gui() {
     state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/eus"
     log_file="$state_dir/gui-launch.log"
     mkdir -p "$state_dir"
-    preferred_platform="${QT_QPA_PLATFORM:-}"
-    if [[ -z "$preferred_platform" && -n "${WAYLAND_DISPLAY:-}" && \
-          "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-        preferred_platform='wayland'
-    fi
     {
         printf '\n[%s] Launching EUS %s\n' "$(date --iso-8601=seconds)" "$VERSION"
-        printf 'DISPLAY=%s WAYLAND_DISPLAY=%s QT_QPA_PLATFORM=%s\n' \
-            "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}" "${preferred_platform:-auto}"
+        printf 'DISPLAY=%s WAYLAND_DISPLAY=%s\n' "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}"
     } >>"$log_file"
-    if [[ ! -x "$GUI" || ! -x "$PYTHON" ]]; then
-        printf 'Missing GUI executable or Python interpreter.\n' >>"$log_file"
-        command -v notify-send >/dev/null 2>&1 && notify-send --urgency=critical \
-            --icon="$EUS_ICON_AVAILABLE" "$APP_NAME" "$GUI_ERROR"
-        return 70
-    fi
-    if ! "$PYTHON" -c 'from PyQt6.QtWidgets import QApplication' >>"$log_file" 2>&1; then
-        printf 'PyQt6 import failed.\n' >>"$log_file"
+    if [[ ! -x "$GUI" ]]; then
+        printf 'Missing GUI executable %s.\n' "$GUI" >>"$log_file"
         command -v notify-send >/dev/null 2>&1 && notify-send --urgency=critical \
             --icon="$EUS_ICON_AVAILABLE" "$APP_NAME" "$GUI_ERROR"
         return 70
     fi
     attempt_log="$(mktemp "$state_dir/gui-attempt.XXXXXX")" || return 70
-    if [[ -n "$preferred_platform" ]]; then
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM="$preferred_platform" \
-            "$PYTHON" "$GUI" >"$attempt_log" 2>&1
-    else
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 "$PYTHON" "$GUI" >"$attempt_log" 2>&1
-    fi
+    "$GUI" "$@" >"$attempt_log" 2>&1
     rc=$?
     cat "$attempt_log" >>"$log_file"
-    if [[ "$rc" -ne 0 && -n "${DISPLAY:-}" && "$preferred_platform" != xcb ]] && \
-       grep -Eqi 'qt\.qpa|platform plugin|could not connect to display' "$attempt_log"; then
-        printf '[%s] Retrying with Qt XCB platform.\n' "$(date --iso-8601=seconds)" >>"$log_file"
+    if [[ "$rc" -ne 0 && -n "${WAYLAND_DISPLAY:-}" && -n "${DISPLAY:-}" ]]; then
+        # Some compositors refuse the window: retry through XWayland.
+        printf '[%s] Retrying through X11.\n' "$(date --iso-8601=seconds)" >>"$log_file"
         : >"$attempt_log"
-        QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_QPA_PLATFORM=xcb "$PYTHON" "$GUI" >"$attempt_log" 2>&1
+        env -u WAYLAND_DISPLAY "$GUI" "$@" >"$attempt_log" 2>&1
         rc=$?
         cat "$attempt_log" >>"$log_file"
     fi
@@ -221,6 +230,15 @@ read_state() {
     [[ "$UPDATE_STATE" == 'ok' ]]
 }
 
+updates_paused() {
+    local key value until=0
+    [[ -r "$PAUSE_FILE" ]] || return 1
+    while IFS='=' read -r key value; do
+        [[ "$key" == PAUSED_UNTIL && "$value" =~ ^[0-9]+$ ]] && until="$value"
+    done <"$PAUSE_FILE"
+    (( until > $(date +%s) ))
+}
+
 invoke_root() {
     local action="$1"; shift
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
@@ -234,11 +252,105 @@ invoke_root() {
     fi
 }
 
+invoke_root_terminal() {
+    # Render the backend progress protocol ("NN" / "# text") for a terminal.
+    local rc
+    invoke_root "$@" | awk '
+        /^[0-9]+$/ { pct = $0; next }
+        /^# / { printf "[%3d%%] %s\n", pct, substr($0, 3); fflush(); next }
+        NF { print; fflush() }'
+    rc="${PIPESTATUS[0]}"
+    if ((rc != 0)) && [[ -r /var/lib/eus/last-error ]]; then
+        printf 'ERROR: %s\n' "$(</var/lib/eus/last-error)" >&2
+    fi
+    return "$rc"
+}
+
+terminal_add_key() {
+    # --add-key NAME FILE|HTTPS-URL|KEY-ID [REPO-URI SUITE [COMPONENT...]]
+    local name="${1:-}" source="${2:-}" uri="${3:-}" suite="${4:-}"
+    local -a args=()
+    if [[ -z "$name" || -z "$source" ]]; then
+        usage >&2
+        return 64
+    fi
+    shift 2
+    args=(--name "$name")
+    if [[ -f "$source" ]]; then
+        args+=(--file "$(realpath -- "$source")")
+    elif [[ "$source" == https://* ]]; then
+        args+=(--url "$source")
+    elif [[ "$source" =~ ^(0x)?[0-9A-Fa-f]{8,40}$ ]]; then
+        args+=(--keyserver "$source")
+    else
+        printf 'The key source must be a file, an https:// URL, or a key ID.\n' >&2
+        return 64
+    fi
+    if [[ -n "$uri" ]]; then
+        [[ -n "$suite" ]] || { printf 'A repository also needs a suite, e.g. stable.\n' >&2; return 64; }
+        shift 2
+        args+=(--repo-uri "$uri" --suite "$suite")
+        (($#)) && args+=(--components "$*")
+    fi
+    invoke_root_terminal add-key "${args[@]}"
+}
+
+terminal_remove_old_kernels() {
+    local answer
+    local -a releases=()
+    mapfile -t releases < <("$TOOL" kernels --format old | sed '/^$/d')
+    if ((${#releases[@]} == 0)); then
+        printf 'No old kernel is installed.\n'
+        return 0
+    fi
+    printf 'Running kernel: %s\nOld kernels: %s\n' "$(uname -r)" "${releases[*]}"
+    read -r -p 'Remove them? [y/N] ' answer
+    case "${answer,,}" in y|yes|s|sim|sin|i|iya|ya) ;; *) return 0 ;; esac
+    invoke_root_terminal kernel-remove "${releases[@]}"
+}
+
+usage() {
+    cat <<'USAGE'
+Usage: eduka-update-system [OPTION]
+
+Graphical interface:
+  --ui                         open the update manager (default)
+  --open updates|health|cleaner|kernel|key-fix|add-key|add-repo|settings
+                               open the manager directly on one dialog
+
+Terminal:
+  --terminal                   check and install updates in this terminal
+  --fix-keys                   repair missing/expired GPG keys and keyrings
+  --fix-duplicates             disable duplicate APT repository entries
+  --add-key NAME SOURCE [URI SUITE [COMPONENT...]]
+                               add a GPG key (file, https URL or key ID) and
+                               optionally a repository signed by it
+  --list-kernels               show installed and installable kernels
+  --install-kernel PACKAGE [--headers]
+  --remove-kernel RELEASE...   remove kernels (never the running one)
+  --remove-old-kernels         remove every kernel older than the running one
+  --add-repo NAME 'deb URI SUITE COMPONENT...'
+                               add a repository; its GPG key is found and
+                               installed automatically
+  --check-os                   check for a new Debian base release
+  --health                     check the system for damage and show fixes
+  --repair                     apply every recommended System Health fix
+  --major-upgrade              install a pending major system update
+  --clean                      clean the system (APT cache, unneeded
+                               packages, leftover configs, old logs)
+  --upgrade-os                 show the repository plan and upgrade the OS
+  --pause DAYS                 pause automatic checks and notifications
+  --resume                     resume automatic checks
+  --schedule interval HOURS | daily HH:MM
+  --check-notify | --watch | --restart | --version
+USAGE
+}
+
 category_counts() {
     CRITICAL=0; MEDIUM=0; NORMAL=0; FLATPAK=0
     [[ -r "$TSV_FILE" ]] || return
     CRITICAL="$(awk -F '\t' '$1=="critical" {n++} END {print n+0}' "$TSV_FILE")"
-    MEDIUM="$(awk -F '\t' '$1=="medium" {n++} END {print n+0}' "$TSV_FILE")"
+    MEDIUM="$(awk -F '\t' '$1=="medium" || $1=="kernel" {n++} END {print n+0}' "$TSV_FILE")"
     NORMAL="$(awk -F '\t' '$1=="normal" {n++} END {print n+0}' "$TSV_FILE")"
     FLATPAK="$(awk -F '\t' '$1=="flatpak" {n++} END {print n+0}' "$TSV_FILE")"
 }
@@ -311,6 +423,11 @@ send_update_notification() {
         panel_status hidden
         return 0
     fi
+    if updates_paused; then
+        # Paused by the user: no indicator and no desktop notification.
+        panel_status hidden
+        return 0
+    fi
     read_state || true
     user_flatpak_fingerprint
     local cache_dir last_file old body combined total urgency
@@ -323,16 +440,12 @@ send_update_notification() {
         panel_status hidden
         return 0
     fi
-    # While the manager is open, its own window is the update notification.
-    # Hide the panel indicator and avoid creating another desktop notification.
-    if eus_gui_is_running; then
-        panel_status hidden
-        return 0
-    fi
     panel_status available --count "$total"
     combined="${VERSION}-${UPDATE_FINGERPRINT}-${USER_FLATPAK_HASH}"
     old=''; [[ -r "$last_file" ]] && old="$(<"$last_file")"
-    [[ "$old" == "$combined" ]] && return 0
+    if [[ "$old" == "$combined" ]]; then
+        update_reminder "$combined" || return 0
+    fi
     category_counts
     FLATPAK=$((FLATPAK + USER_FLATPAK_COUNT))
     printf -v body "$AVAILABLE" "$total" "$CRITICAL" "$MEDIUM" "$NORMAL" "$FLATPAK"
@@ -353,6 +466,30 @@ send_update_notification() {
             --urgency="$urgency" --expire-time=30000 "$APP_NAME" "$body" || true
     fi
     printf '%s\n' "$combined" >"$last_file"
+}
+
+update_reminder() {
+    # Like mintupdate's update tracker: if the same updates stay pending,
+    # remind after 2 days for security updates and 7 days otherwise, at most
+    # once a day. Returns 0 when a reminder is due.
+    local fingerprint="$1" cache_dir first_file day_file first now age limit=7
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    first_file="$cache_dir/pending-since"
+    day_file="$cache_dir/reminded-on"
+    now="$(date +%s)"
+    if [[ ! -r "$first_file" || "$(head -n1 "$first_file")" != "$fingerprint" ]]; then
+        printf '%s\n%s\n' "$fingerprint" "$now" >"$first_file"
+        return 1
+    fi
+    first="$(sed -n 2p "$first_file")"
+    [[ "$first" =~ ^[0-9]+$ ]] || return 1
+    age=$(((now - first) / 86400))
+    category_counts
+    ((CRITICAL > 0)) && limit=2
+    ((age >= limit)) || return 1
+    [[ -r "$day_file" && "$(<"$day_file")" == "$(date +%F)" ]] && return 1
+    date +%F >"$day_file"
+    return 0
 }
 
 send_restart_notification() {
@@ -387,6 +524,150 @@ send_restart_notification() {
     fi
 }
 
+send_old_kernel_notification() {
+    # Once per boot: after restarting into a new kernel, point to the old ones.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    local cache_dir stamp_file boot count action
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/old-kernel-notified"
+    boot="$(current_boot_id)"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$boot" ]] && return 0
+    mkdir -p "$cache_dir"
+    printf '%s\n' "$boot" >"$stamp_file"
+    count="$("$TOOL" kernels --format old 2>/dev/null | grep -c . || true)"
+    [[ "$count" =~ ^[0-9]+$ ]] && ((count > 0)) || return 0
+    if notify-send --help 2>&1 | grep -q -- '--action'; then
+        (
+            action="$(notify-send --app-name="$APP_NAME" --icon=eduka-update-system \
+                --urgency=low --expire-time=30000 --action="default=$OPEN_KERNEL" \
+                "$APP_NAME" "$(printf "$OLD_KERNEL_BODY" "$count")" 2>/dev/null || true)"
+            [[ "$action" == 'default' ]] && /usr/local/bin/eduka-update-system --open kernel >/dev/null 2>&1
+        ) &
+    else
+        notify-send --app-name="$APP_NAME" --icon=eduka-update-system --urgency=low \
+            "$APP_NAME" "$(printf "$OLD_KERNEL_BODY" "$count")" || true
+    fi
+}
+
+notify_with_action() {
+    # notify_with_action ACTION-LABEL GUI-PAGE TITLE BODY URGENCY
+    local label="$1" page="$2" title="$3" body="$4" urgency="${5:-normal}" action
+    if notify-send --help 2>&1 | grep -q -- '--action'; then
+        (
+            action="$(notify-send --app-name="$APP_NAME" --icon=eduka-update-system \
+                --urgency="$urgency" --expire-time=60000 --action="default=$label" \
+                "$title" "$body" 2>/dev/null || true)"
+            [[ "$action" == 'default' ]] && /usr/local/bin/eduka-update-system --open "$page" >/dev/null 2>&1
+        ) &
+    else
+        notify-send --app-name="$APP_NAME" --icon=eduka-update-system --urgency="$urgency" \
+            "$title" "$body" || true
+    fi
+}
+
+read_os_upgrade() {
+    OS_AVAILABLE=0; OS_NAME='Edukasaun OS'; OS_TARGET=''; OS_TARGET_VERSION=''; OS_MODE=''
+    [[ -r "$OS_UPGRADE_FILE" ]] || return 1
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+            available) [[ "$value" == 1 ]] && OS_AVAILABLE=1 ;;
+            os_name) OS_NAME="$value" ;;
+            target_codename) OS_TARGET="$value" ;;
+            target_version) OS_TARGET_VERSION="$value" ;;
+            mode) OS_MODE="$value" ;;
+        esac
+    done <"$OS_UPGRADE_FILE"
+    [[ "$OS_AVAILABLE" -eq 1 && -n "$OS_TARGET" ]]
+}
+
+send_os_upgrade_notification() {
+    # Once per new release, even while updates are paused: it is not an update.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    read_os_upgrade || return 0
+    eus_gui_is_running && return 0
+    local cache_dir stamp_file
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/os-upgrade-notified"
+    mkdir -p "$cache_dir"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$OS_TARGET" ]] && return 0
+    printf '%s\n' "$OS_TARGET" >"$stamp_file"
+    if [[ "$OS_MODE" == continuous ]]; then
+        notify_with_action "$OPEN_UPDATES" updates "$MAJOR_TITLE" \
+            "$(printf "$MAJOR_BODY" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET" "$OS_NAME")" normal
+    else
+        notify_with_action "$OPEN_UPGRADE" upgrade-os "$OS_UPGRADE_TITLE" \
+            "$(printf "$OS_UPGRADE_BODY" "$OS_NAME" "${OS_TARGET_VERSION%%.*}" "$OS_TARGET")" normal
+    fi
+}
+
+send_health_notification() {
+    # Critical or warning findings of the last background health check,
+    # announced once per distinct set of problems.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    [[ -r "$HEALTH_FILE" ]] || return 0
+    eus_gui_is_running && return 0
+    local summary cache_dir stamp_file hash
+    summary="$("$TOOL" health-summary 2>/dev/null)" || return 0
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/health-notified"
+    mkdir -p "$cache_dir"
+    if [[ -z "$(head -n1 <<<"$summary")" ]]; then
+        rm -f -- "$stamp_file"
+        return 0
+    fi
+    hash="$(head -n1 <<<"$summary")"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$hash" ]] && return 0
+    printf '%s\n' "$hash" >"$stamp_file"
+    notify_with_action "$OPEN_HEALTH" health "$HEALTH_TITLE" \
+        "$(printf "$HEALTH_BODY" "$(sed -n 2p <<<"$summary")")" critical
+}
+
+send_missing_key_notification() {
+    # Repositories added in a terminal often lack their key: say so once.
+    command -v notify-send >/dev/null 2>&1 || return 0
+    [[ -r "$APT_UPDATE_LOG" ]] || return 0
+    eus_gui_is_running && return 0
+    local keys cache_dir stamp_file hash count
+    keys="$(grep -oE 'NO_PUBKEY [0-9A-Fa-f]+|EXPKEYSIG [0-9A-Fa-f]+' "$APT_UPDATE_LOG" | sort -u)"
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
+    stamp_file="$cache_dir/missing-key-notified"
+    mkdir -p "$cache_dir"
+    if [[ -z "$keys" ]]; then
+        rm -f -- "$stamp_file"
+        return 0
+    fi
+    hash="$(sha256sum <<<"$keys" | awk '{print $1}')"
+    [[ -r "$stamp_file" && "$(<"$stamp_file")" == "$hash" ]] && return 0
+    printf '%s\n' "$hash" >"$stamp_file"
+    count="$(grep -c . <<<"$keys")"
+    notify_with_action "$OPEN_KEYFIX" key-fix "$KEY_TITLE" "$(printf "$KEY_BODY" "$count")" normal
+}
+
+terminal_add_repo() {
+    # --add-repo NAME 'deb [options] URI SUITE COMPONENT...'
+    local name="${1:-}" line="${2:-}"
+    if [[ -z "$name" || -z "$line" ]]; then
+        usage >&2
+        return 64
+    fi
+    invoke_root_terminal add-repo --name "$name" --line "$line" --auto-key
+}
+
+terminal_os_upgrade() {
+    invoke_root_terminal os-check >/dev/null || true
+    if ! read_os_upgrade; then
+        printf 'No new Debian base release is available.\n'
+        return 0
+    fi
+    printf '%s can move to Debian %s "%s".\n\nRepository plan:\n' "$OS_NAME" "$OS_TARGET_VERSION" "$OS_TARGET"
+    "$TOOL" os-plan --target "$OS_TARGET" --format text || return 1
+    local answer
+    read -r -p 'Start the OS upgrade now? This can take a long time. [y/N] ' answer
+    case "${answer,,}" in y|yes|s|sim|sin|i|iya|ya) ;; *) return 0 ;; esac
+    invoke_root_terminal os-upgrade "$OS_TARGET"
+}
+
 watch_updates() {
     local cache_dir lock_file
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/eus"
@@ -395,7 +676,11 @@ watch_updates() {
     exec 8>"$lock_file"
     flock -n 8 || exit 0
     sleep 5
+    send_old_kernel_notification
     while true; do
+        send_os_upgrade_notification
+        send_missing_key_notification
+        send_health_notification
         send_update_notification
         send_restart_notification
         sleep "$CHECK_INTERVAL_SECONDS"
@@ -405,14 +690,69 @@ watch_updates() {
 detect_language
 load_messages
 
-case "${1:---ui}" in
-    --ui)
-        launch_gui
+command_name="${1:---ui}"
+(($#)) && shift
+case "$command_name" in
+    --ui) launch_gui "$@" ;;
+    --open)
+        case "${1:-}" in
+            kernel|key-fix|add-key|add-repo|upgrade-os|settings|cleaner|health|updates) launch_gui --open "$1" ;;
+            *) usage >&2; exit 64 ;;
+        esac
         ;;
     --terminal|--run) terminal_update ;;
     --check-notify) send_update_notification; send_restart_notification ;;
     --watch) watch_updates ;;
     --restart) invoke_root reboot ;;
+    --fix-keys) invoke_root_terminal fix-keys ;;
+    --fix-duplicates) invoke_root_terminal fix-duplicates ;;
+    --add-key) terminal_add_key "$@" ;;
+    --list-kernels) "$TOOL" kernels --format text ;;
+    --install-kernel)
+        (($#)) || { usage >&2; exit 64; }
+        invoke_root_terminal kernel-install "$@"
+        ;;
+    --remove-kernel)
+        (($#)) || { usage >&2; exit 64; }
+        invoke_root_terminal kernel-remove "$@"
+        ;;
+    --remove-old-kernels) terminal_remove_old_kernels ;;
+    --add-repo) terminal_add_repo "$@" ;;
+    --check-os)
+        invoke_root_terminal os-check >/dev/null
+        if read_os_upgrade; then
+            printf 'Upgrade OS available: Debian %s "%s".\n' "$OS_TARGET_VERSION" "$OS_TARGET"
+        else
+            printf 'No new Debian base release is available.\n'
+        fi
+        ;;
+    --upgrade-os) terminal_os_upgrade ;;
+    --health)
+        "$TOOL" health --format text
+        ;;
+    --repair)
+        mapfile -t fixes < <("$TOOL" health --format fixes)
+        if ((${#fixes[@]} == 0)); then
+            printf 'No repair is needed.\n'
+        else
+            invoke_root_terminal health-fix "${fixes[@]}"
+        fi
+        ;;
+    --major-upgrade) invoke_root_terminal major-upgrade ;;
+    --clean)
+        "$TOOL" scan-clean --scope system --format text
+        invoke_root_terminal clean autoremove configs apt-cache logs crash
+        ;;
+    --pause)
+        [[ "${1:-}" =~ ^[0-9]+$ ]] || { usage >&2; exit 64; }
+        invoke_root_terminal pause "$1"
+        ;;
+    --resume) invoke_root_terminal pause 0 ;;
+    --schedule)
+        (($# == 2)) || { usage >&2; exit 64; }
+        invoke_root_terminal set-schedule "$1" "$2"
+        ;;
     --version) printf 'Eduka-Update-System %s\n' "$VERSION" ;;
-    *) printf 'Usage: %s [--ui|--terminal|--check-notify|--watch|--restart|--version]\n' "$0" >&2; exit 64 ;;
+    -h|--help) usage ;;
+    *) usage >&2; exit 64 ;;
 esac

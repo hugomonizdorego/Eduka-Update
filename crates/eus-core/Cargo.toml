@@ -1,0 +1,17 @@
+[package]
+name = "eus-core"
+description = "Shared logic of Eduka-Update-System: APT sources, keyrings, kernels, cleaner, health, release policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+glob.workspace = true
+tempfile.workspace = true
+wait-timeout.workspace = true
+libc.workspace = true
+ureq.workspace = true

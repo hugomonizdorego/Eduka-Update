@@ -1,0 +1,20 @@
+Package: eduka-update-system
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: @MAINTAINER@
+Installed-Size: @INSTALLED_SIZE@
+Section: admin
+Priority: optional
+Depends: libc6, libgcc-s1, libfontconfig1, libfreetype6, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libnotify-bin, pkexec | policykit-1, gnupg, apt, systemd | systemd-sysv
+Recommends: fonts-dejavu-core | fonts-noto-core, lxqt-policykit | polkit-kde-agent-1 | mate-polkit | policykit-1-gnome, needrestart, flatpak, desktop-file-utils, hicolor-icon-theme
+Homepage: https://www.edukasaunos.tl/
+Description: graphical update, kernel and repository-key manager for Edukasaun OS
+ Eduka-Update-System (EUS) presents APT and Flatpak updates grouped by risk,
+ installs them through PolicyKit, and integrates with the Eduka-Panel.
+ Its programs are written in Rust; the interface uses Slint.
+ .
+ It also installs and removes kernels (old kernels are marked after a
+ restart and can be removed safely), repairs missing or expired APT GPG
+ keys and damaged keyrings, adds GPG keys and repositories manually, fixes
+ duplicate repository entries, refreshes automatically when a repository is
+ added in a terminal, and lets the user schedule or pause update checks.

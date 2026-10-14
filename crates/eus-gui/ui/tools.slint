@@ -1,0 +1,1126 @@
+// Tool pages that open inside the panel (Cleaner, Kernels, Key Fix, ...).
+
+import { ListView, TabWidget, TextEdit, LineEdit, ComboBox, SpinBox, ScrollView } from "std-widgets.slint";
+import { Theme, Tr, Title, Muted, PrimaryButton, SecondaryButton, DangerButton, Check, CheckLabel, Radio, Card, Bar, HeaderCell, Icon } from "widgets.slint";
+import { App, CleanRow, KernelRow, TableRow } from "state.slint";
+
+// Title, intro, content, progress of the running task and the action row.
+export component ToolPage inherits VerticalLayout {
+    in property <string> title;
+    in property <string> intro;
+    in property <string> back: "home";
+    in property <bool> busy-lock: App.task-visible;
+    spacing: 7px;
+    Title {
+        text: root.title;
+    }
+    if root.intro != "": Muted {
+        text: root.intro;
+    }
+    @children
+    if App.task-visible: VerticalLayout {
+        spacing: 3px;
+        Text {
+            text: App.task-text;
+            color: Theme.text;
+            overflow: elide;
+        }
+        Bar {
+            value: App.task-value;
+        }
+    }
+}
+
+component BackButton inherits SecondaryButton {
+    in property <string> target;
+    text: Tr.t("close");
+    enabled: !App.task-visible;
+    clicked => {
+        App.navigate(root.target);
+    }
+}
+
+// Two- to five-column read-only table.
+export component Table inherits Card {
+    in property <[TableRow]> rows;
+    in property <[string]> headers;
+    in property <[length]> widths;   // 0 = stretch
+    in-out property <int> current: -1;
+    in property <bool> selectable;
+    in property <int> color-column: -1;   // column drawn in the row colour
+    in property <bool> bold-color;
+    clip: true;
+    VerticalLayout {
+        padding: 1px;
+        if root.headers.length > 0: Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                for header[i] in root.headers: HeaderCell {
+                    text: header;
+                    min-width: root.widths[i] > 0 ? root.widths[i] : 40px;
+                    max-width: root.widths[i] > 0 ? root.widths[i] : 10000px;
+                    preferred-width: root.widths[i] > 0 ? root.widths[i] : 100px;
+                    horizontal-stretch: root.widths[i] > 0 ? 0 : 1;
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line;
+            }
+        }
+        ListView {
+            for row[index] in root.rows: Rectangle {
+                height: 26px;
+                background: root.selectable && index == root.current ? Theme.selected : mod(index, 2) == 1 ? #FAFBFA : white;
+                TouchArea {
+                    clicked => {
+                        root.current = index;
+                    }
+                }
+                if row.ok: Text {
+                    x: 8px;
+                    text: row.a;
+                    color: #0F7B4F;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                if !row.ok: HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    for width[i] in root.widths: Text {
+                        text: i == 0 ? row.a : i == 1 ? row.b : i == 2 ? row.c : i == 3 ? row.d : row.e;
+                        min-width: width > 0 ? width : 40px;
+                        max-width: width > 0 ? width : 10000px;
+                        preferred-width: width > 0 ? width : 100px;
+                        horizontal-stretch: width > 0 ? 0 : 1;
+                        color: i == root.color-column ? row.color : Theme.text;
+                        font-weight: i == root.color-column && root.bold-color ? 700 : 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component CleanerPage inherits ToolPage {
+    title: Tr.t("cl_title");
+    intro: Tr.t("cl_intro");
+    Card {
+        vertical-stretch: 1;
+        clip: true;
+        VerticalLayout {
+            padding: 1px;
+            Rectangle {
+                height: 24px;
+                HorizontalLayout {
+                    padding-left: 32px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    HeaderCell {
+                        width: 260px;
+                        text: Tr.t("cl_col_item");
+                    }
+                    HeaderCell {
+                        width: 70px;
+                        text: Tr.t("size");
+                    }
+                    HeaderCell {
+                        horizontal-stretch: 1;
+                        text: Tr.t("cl_col_detail");
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.line;
+                }
+            }
+            ListView {
+                for row[index] in App.clean-rows: Rectangle {
+                    height: 26px;
+                    if row.header: Text {
+                        x: 8px;
+                        text: row.title;
+                        font-weight: 700;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                    if !row.header: HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        Check {
+                            y: (parent.height - self.height) / 2;
+                            checked: row.checked;
+                            enabled: !App.task-visible;
+                            toggled => {
+                                App.clean-toggle(index);
+                            }
+                        }
+                        Text {
+                            width: 260px;
+                            text: row.title;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: Theme.text;
+                        }
+                        Text {
+                            width: 70px;
+                            text: row.size;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: row.detail;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: Theme.muted;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Text {
+        text: App.clean-scanning ? Tr.t("cl_scanning") : App.clean-total;
+        color: Theme.text;
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        SecondaryButton {
+            text: Tr.t("cl_scan");
+            enabled: !App.task-visible && !App.clean-scanning;
+            clicked => {
+                App.clean-scan();
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        BackButton {
+            target: "maintenance";
+        }
+        PrimaryButton {
+            text: Tr.t("cl_clean");
+            enabled: App.can-clean && !App.task-visible && !App.busy;
+            clicked => {
+                App.clean-run();
+            }
+        }
+    }
+}
+
+export component KernelsPage inherits ToolPage {
+    title: Tr.t("kernel_title");
+    intro: Tr.t("kernel_intro");
+    Text {
+        text: App.kernel-running;
+        color: #0F7B4F;
+        font-weight: 600;
+    }
+    Card {
+        vertical-stretch: 1;
+        clip: true;
+        VerticalLayout {
+            padding: 1px;
+            Rectangle {
+                height: 24px;
+                HorizontalLayout {
+                    padding-left: 32px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    HeaderCell {
+                        horizontal-stretch: 1;
+                        text: Tr.t("k_col_release");
+                    }
+                    HeaderCell {
+                        width: 230px;
+                        text: Tr.t("k_col_status");
+                    }
+                    HeaderCell {
+                        width: 110px;
+                        text: Tr.t("k_col_version");
+                    }
+                    HeaderCell {
+                        width: 70px;
+                        text: Tr.t("k_col_size");
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.line;
+                }
+            }
+            ListView {
+                for row[index] in App.kernels: Rectangle {
+                    height: 27px;
+                    background: row.background;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        Rectangle {
+                            width: 16px;
+                            if row.checkable: Check {
+                                y: (parent.height - self.height) / 2;
+                                checked: row.checked;
+                                enabled: !App.task-visible;
+                                toggled => {
+                                    App.kernel-toggle(index);
+                                }
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: row.release;
+                            font-weight: row.state == "running" ? 700 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: Theme.text;
+                        }
+                        Text {
+                            width: 230px;
+                            text: row.label;
+                            color: row.color;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            width: 110px;
+                            text: row.version;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: Theme.text;
+                        }
+                        Text {
+                            width: 70px;
+                            text: row.size;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        SecondaryButton {
+            text: Tr.t("k_refresh");
+            enabled: !App.task-visible && !App.kernel-loading;
+            clicked => {
+                App.kernel-refresh();
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        SecondaryButton {
+            text: Tr.t("k_remove_old");
+            enabled: App.can-remove-old && !App.task-visible && !App.busy;
+            clicked => {
+                App.kernel-remove-old();
+            }
+        }
+        DangerButton {
+            text: Tr.t("k_remove");
+            enabled: App.can-remove-kernel && !App.task-visible && !App.busy;
+            clicked => {
+                App.kernel-remove();
+            }
+        }
+    }
+    Text {
+        text: Tr.t("k_available");
+        font-weight: 600;
+        color: Theme.text;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        ComboBox {
+            horizontal-stretch: 1;
+            model: App.kernel-available;
+            current-index <=> App.kernel-choice;
+            enabled: App.kernel-available.length > 0;
+        }
+        CheckLabel {
+            text: Tr.t("k_headers");
+            checked <=> App.kernel-headers;
+        }
+        PrimaryButton {
+            text: Tr.t("k_install");
+            enabled: App.kernel-available.length > 0 && !App.task-visible && !App.busy;
+            clicked => {
+                App.kernel-install();
+            }
+        }
+    }
+    if App.kernel-note != "": Muted {
+        text: App.kernel-note;
+    }
+    HorizontalLayout {
+        alignment: end;
+        BackButton {
+            target: "maintenance";
+        }
+    }
+}
+
+export component KeyFixPage inherits ToolPage {
+    title: Tr.t("kf_title");
+    intro: Tr.t("kf_intro");
+    TabWidget {
+        vertical-stretch: 1;
+        current-index <=> App.keyfix-tab;
+        Tab {
+            title: Tr.t("kf_tab_overview");
+            Table {
+                rows: App.repo-overview;
+                headers: [Tr.t("rp_col_status"), Tr.t("rp_col_repo"), Tr.t("rp_col_suite"), Tr.t("rp_col_type"), Tr.t("rp_col_keyring")];
+                widths: [92px, 0px, 100px, 84px, 0px];
+                color-column: 0;
+                bold-color: true;
+            }
+        }
+        Tab {
+            title: Tr.t("kf_tab_keys");
+            VerticalLayout {
+                padding: 6px;
+                spacing: 6px;
+                Table {
+                    vertical-stretch: 1;
+                    rows: App.key-rows;
+                    headers: [Tr.t("kf_col_item"), Tr.t("kf_col_problem")];
+                    widths: [330px, 0px];
+                    color-column: 1;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Muted {
+                        horizontal-stretch: 1;
+                        text: App.keyfix-scanning ? Tr.t("kf_scanning") : App.keys-note;
+                        vertical-alignment: center;
+                    }
+                    PrimaryButton {
+                        text: Tr.t("kf_fix_keys");
+                        enabled: !App.keyfix-scanning && !App.task-visible && !App.busy;
+                        clicked => {
+                            App.fix-keys();
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: App.dups-tab;
+            VerticalLayout {
+                padding: 6px;
+                spacing: 6px;
+                Table {
+                    vertical-stretch: 1;
+                    rows: App.dup-rows;
+                    headers: [Tr.t("kf_col_item"), Tr.t("kf_col_problem")];
+                    widths: [330px, 0px];
+                    color-column: 1;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Muted {
+                        horizontal-stretch: 1;
+                        text: App.keyfix-scanning ? Tr.t("kf_scanning") : App.dups-note;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        wrap: no-wrap;
+                    }
+                    PrimaryButton {
+                        text: Tr.t("kf_fix_dups");
+                        enabled: !App.keyfix-scanning && !App.task-visible && !App.busy;
+                        clicked => {
+                            App.fix-duplicates();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        SecondaryButton {
+            text: Tr.t("kf_rescan");
+            enabled: !App.keyfix-scanning && !App.task-visible;
+            clicked => {
+                App.keyfix-scan();
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        BackButton {
+            target: "sources";
+        }
+    }
+}
+
+component FormRow inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 8px;
+    Text {
+        width: 150px;
+        text: root.label;
+        color: Theme.text;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    @children
+}
+
+export component AddRepoPage inherits ToolPage {
+    title: Tr.t("ar_title");
+    intro: Tr.t("ar_intro");
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: 7px;
+            padding-right: 10px;
+            FormRow {
+                label: Tr.t("ak_name");
+                LineEdit {
+                    text <=> App.ar-name;
+                    placeholder-text: Tr.t("ak_name_hint");
+                }
+            }
+            Card {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    Text {
+                        text: Tr.t("ar_mode");
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    Radio {
+                        text: Tr.t("ar_line");
+                        checked: App.ar-line-mode;
+                        clicked => {
+                            App.ar-line-mode = true;
+                        }
+                    }
+                    LineEdit {
+                        text <=> App.ar-line;
+                        placeholder-text: "deb [arch=amd64] https://repo.example.org/debian stable main";
+                        edited(text) => {
+                            App.ar-line-mode = true;
+                            App.ar-line-edited(text);
+                        }
+                    }
+                    Radio {
+                        text: Tr.t("ar_fields");
+                        checked: !App.ar-line-mode;
+                        clicked => {
+                            App.ar-line-mode = false;
+                        }
+                    }
+                    FormRow {
+                        label: Tr.t("ak_repo_uri");
+                        LineEdit {
+                            text <=> App.ar-uri;
+                            placeholder-text: "https://repo.example.org/debian";
+                            edited => {
+                                App.ar-line-mode = false;
+                            }
+                        }
+                    }
+                    FormRow {
+                        label: Tr.t("ak_suite");
+                        LineEdit {
+                            text <=> App.ar-suite;
+                            placeholder-text: "stable";
+                            edited => {
+                                App.ar-line-mode = false;
+                            }
+                        }
+                    }
+                    FormRow {
+                        label: Tr.t("ak_components");
+                        LineEdit {
+                            text <=> App.ar-components;
+                        }
+                    }
+                    FormRow {
+                        label: Tr.t("ak_arch");
+                        LineEdit {
+                            text <=> App.ar-arch;
+                            placeholder-text: "amd64 (" + Tr.t("ak_optional") + ")";
+                        }
+                    }
+                }
+            }
+            CheckLabel {
+                text: Tr.t("ak_source_pkgs");
+                checked <=> App.ar-source;
+            }
+            CheckLabel {
+                text: Tr.t("ar_auto_key");
+                checked <=> App.ar-auto-key;
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: end;
+        BackButton {
+            target: "sources";
+        }
+        PrimaryButton {
+            text: Tr.t("ar_add");
+            enabled: !App.task-visible && !App.busy;
+            clicked => {
+                App.ar-submit();
+            }
+        }
+    }
+}
+
+export component AddKeyPage inherits ToolPage {
+    title: Tr.t("ak_title");
+    intro: Tr.t("ak_intro");
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: 7px;
+            padding-right: 10px;
+            FormRow {
+                label: Tr.t("ak_name");
+                LineEdit {
+                    text <=> App.ak-name;
+                    placeholder-text: Tr.t("ak_name_hint");
+                    edited => {
+                        App.ak-changed();
+                    }
+                }
+            }
+            Card {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    Text {
+                        text: Tr.t("ak_source");
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Radio {
+                            width: 150px;
+                            text: Tr.t("ak_file");
+                            checked: App.ak-source == 0;
+                            clicked => {
+                                App.ak-source = 0;
+                            }
+                        }
+                        LineEdit {
+                            text <=> App.ak-file;
+                            placeholder-text: "/home/…/vendor.asc";
+                            edited => {
+                                App.ak-source = 0;
+                            }
+                            accepted => {
+                                App.ak-inspect();
+                            }
+                        }
+                        if App.can-browse: SecondaryButton {
+                            text: Tr.t("ak_browse");
+                            clicked => {
+                                App.ak-browse();
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Radio {
+                            width: 150px;
+                            text: Tr.t("ak_url");
+                            checked: App.ak-source == 1;
+                            clicked => {
+                                App.ak-source = 1;
+                            }
+                        }
+                        LineEdit {
+                            text <=> App.ak-url;
+                            placeholder-text: "https://example.org/key.asc";
+                            edited => {
+                                App.ak-source = 1;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Radio {
+                            width: 150px;
+                            text: Tr.t("ak_keyserver");
+                            checked: App.ak-source == 2;
+                            clicked => {
+                                App.ak-source = 2;
+                            }
+                        }
+                        LineEdit {
+                            text <=> App.ak-keyid;
+                            placeholder-text: "0x0123456789ABCDEF";
+                            edited => {
+                                App.ak-source = 2;
+                            }
+                        }
+                    }
+                    if App.ak-key-info != "": Muted {
+                        text: App.ak-key-info;
+                    }
+                }
+            }
+            Card {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    CheckLabel {
+                        text: Tr.t("ak_repo");
+                        checked <=> App.ak-with-repo;
+                        toggled => {
+                            App.ak-changed();
+                        }
+                    }
+                    if App.ak-with-repo: VerticalLayout {
+                        spacing: 6px;
+                        FormRow {
+                            label: Tr.t("ak_repo_uri");
+                            LineEdit {
+                                text <=> App.ak-uri;
+                                placeholder-text: "https://repo.example.org/debian";
+                                edited => {
+                                    App.ak-changed();
+                                }
+                            }
+                        }
+                        FormRow {
+                            label: Tr.t("ak_suite");
+                            LineEdit {
+                                text <=> App.ak-suite;
+                                placeholder-text: "stable";
+                                edited => {
+                                    App.ak-changed();
+                                }
+                            }
+                        }
+                        FormRow {
+                            label: Tr.t("ak_components");
+                            LineEdit {
+                                text <=> App.ak-components;
+                                edited => {
+                                    App.ak-changed();
+                                }
+                            }
+                        }
+                        FormRow {
+                            label: Tr.t("ak_arch");
+                            LineEdit {
+                                text <=> App.ak-arch;
+                                placeholder-text: "amd64 (" + Tr.t("ak_optional") + ")";
+                                edited => {
+                                    App.ak-changed();
+                                }
+                            }
+                        }
+                        CheckLabel {
+                            text: Tr.t("ak_source_pkgs");
+                            checked <=> App.ak-source-pkgs;
+                            toggled => {
+                                App.ak-changed();
+                            }
+                        }
+                    }
+                }
+            }
+            Text {
+                text: Tr.t("ak_preview");
+                font-weight: 600;
+                color: Theme.text;
+            }
+            Card {
+                height: 110px;
+                TextEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    read-only: true;
+                    text: App.ak-preview;
+                    font-size: Theme.font-small;
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: end;
+        BackButton {
+            target: "sources";
+        }
+        PrimaryButton {
+            text: Tr.t("ak_add");
+            enabled: !App.task-visible && !App.busy;
+            clicked => {
+                App.ak-submit();
+            }
+        }
+    }
+}
+
+export component UpgradeOsPage inherits ToolPage {
+    title: Tr.t("os_title");
+    intro: Tr.t("os_intro");
+    Text {
+        text: App.os-headline;
+        color: #0F7B4F;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+    Table {
+        vertical-stretch: 1;
+        rows: App.os-plan;
+        headers: [Tr.t("os_col_repo"), Tr.t("os_col_current"), Tr.t("os_col_new"), Tr.t("os_col_action")];
+        widths: [0px, 120px, 120px, 150px];
+        color-column: 3;
+        bold-color: true;
+    }
+    if App.os-note != "": Text {
+        text: App.os-note;
+        color: Theme.text;
+        wrap: word-wrap;
+    }
+    Muted {
+        text: Tr.t("os_warning");
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: end;
+        BackButton {
+            target: "home";
+        }
+        PrimaryButton {
+            text: Tr.t("os_start");
+            enabled: App.can-start-os && !App.task-visible && !App.busy;
+            clicked => {
+                App.os-start();
+            }
+        }
+    }
+}
+
+export component PrefsPage inherits ToolPage {
+    title: Tr.t("settings_title");
+    TabWidget {
+        vertical-stretch: 1;
+        current-index <=> App.pref-tab;
+        Tab {
+            title: Tr.t("st_schedule");
+            VerticalLayout {
+                padding: 8px;
+                spacing: 8px;
+                alignment: start;
+                Card {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: Tr.t("st_schedule");
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Radio {
+                                width: 170px;
+                                text: Tr.t("st_every");
+                                checked: !App.pref-daily;
+                                clicked => {
+                                    App.pref-daily = false;
+                                }
+                            }
+                            ComboBox {
+                                width: 200px;
+                                model: App.pref-intervals;
+                                current-index <=> App.pref-interval;
+                                selected => {
+                                    App.pref-daily = false;
+                                }
+                            }
+                            Rectangle {}
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Radio {
+                                width: 170px;
+                                text: Tr.t("st_daily");
+                                checked: App.pref-daily;
+                                clicked => {
+                                    App.pref-daily = true;
+                                }
+                            }
+                            LineEdit {
+                                width: 90px;
+                                text <=> App.pref-time;
+                                placeholder-text: "09:00";
+                                edited => {
+                                    App.pref-daily = true;
+                                }
+                            }
+                            Rectangle {}
+                        }
+                    }
+                }
+                Card {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: Tr.t("st_pause");
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: App.pause-status;
+                            font-weight: 600;
+                            color: App.paused ? #93370D : #05603A;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: Tr.t("st_pause_for");
+                                vertical-alignment: center;
+                                color: Theme.text;
+                            }
+                            SpinBox {
+                                width: 90px;
+                                minimum: 1;
+                                maximum: 365;
+                                value <=> App.pause-days;
+                            }
+                            Text {
+                                text: Tr.t("st_days");
+                                vertical-alignment: center;
+                                color: Theme.text;
+                            }
+                            for days in [1, 3, 7, 14, 30]: SecondaryButton {
+                                text: days;
+                                min-width: 38px;
+                                clicked => {
+                                    App.pause-days = days;
+                                }
+                            }
+                            Rectangle {}
+                        }
+                        Muted {
+                            text: Tr.t("st_pause_note");
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: end;
+                            SecondaryButton {
+                                text: Tr.t("st_resume_button");
+                                enabled: App.paused && !App.task-visible;
+                                clicked => {
+                                    App.pause(0);
+                                }
+                            }
+                            SecondaryButton {
+                                text: Tr.t("st_pause_button");
+                                enabled: !App.task-visible;
+                                clicked => {
+                                    App.pause(App.pause-days);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: Tr.t("st_automation");
+            VerticalLayout {
+                padding: 8px;
+                spacing: 8px;
+                alignment: start;
+                Card {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: Tr.t("st_automation");
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: Tr.t("st_auto_upgrade");
+                                vertical-alignment: center;
+                                color: Theme.text;
+                            }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: App.pref-auto-choices;
+                                current-index <=> App.pref-auto;
+                            }
+                        }
+                        Muted {
+                            text: Tr.t("st_auto_note");
+                        }
+                        CheckLabel {
+                            text: Tr.t("st_auto_clean");
+                            checked <=> App.pref-clean;
+                        }
+                        CheckLabel {
+                            text: App.has-timeshift ? Tr.t("st_timeshift") : Tr.t("st_timeshift_missing");
+                            checked <=> App.pref-timeshift;
+                            enabled: App.has-timeshift;
+                        }
+                    }
+                }
+                Card {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: Tr.t("st_general");
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        CheckLabel {
+                            text: Tr.t("notifications");
+                            checked <=> App.pref-notify;
+                        }
+                    }
+                }
+            }
+        }
+        Tab {
+            title: Tr.t("st_ignored");
+            VerticalLayout {
+                padding: 8px;
+                spacing: 6px;
+                Table {
+                    vertical-stretch: 1;
+                    rows: App.ignored;
+                    widths: [0px];
+                    selectable: true;
+                    current <=> App.ignored-current;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    SecondaryButton {
+                        text: Tr.t("st_unignore");
+                        enabled: App.ignored-current >= 0 && !App.task-visible;
+                        clicked => {
+                            App.unignore();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: end;
+        SecondaryButton {
+            text: Tr.t("cancel");
+            enabled: !App.task-visible;
+            clicked => {
+                App.navigate("settings");
+            }
+        }
+        PrimaryButton {
+            text: Tr.t("save");
+            enabled: !App.task-visible && !App.busy;
+            clicked => {
+                App.save-prefs();
+            }
+        }
+    }
+}
+
+export component TextPage inherits ToolPage {
+    in property <string> text;
+    
+    in property <bool> history;
+    Card {
+        vertical-stretch: 1;
+        TextEdit {
+            width: parent.width;
+            height: parent.height;
+            read-only: true;
+            text: root.text;
+            wrap: no-wrap;
+            font-size: Theme.font-small;
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        if root.history: SecondaryButton {
+            text: Tr.t("clear_history");
+            clicked => {
+                App.clear-history();
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        BackButton {
+            target: root.back;
+        }
+    }
+}
+
+export component AboutPage inherits ToolPage {
+    title: Tr.t("about_title");
+    HorizontalLayout {
+        spacing: 14px;
+        alignment: start;
+        Image {
+            source: @image-url("../../../assets/icons/hicolor/48x48/apps/eduka-update-system.png");
+            width: 48px;
+            height: 48px;
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: "Eduka-Update-System";
+                font-size: Theme.font-title;
+                font-weight: 700;
+                color: Theme.brand;
+            }
+            Muted {
+                text: Tr.t("about_version") + ": " + App.version;
+            }
+        }
+    }
+    Text {
+        text: Tr.t("about_body");
+        wrap: word-wrap;
+        color: Theme.text;
+    }
+    Rectangle {
+        vertical-stretch: 1;
+    }
+    HorizontalLayout {
+        alignment: end;
+        BackButton {
+            target: "settings";
+        }
+    }
+}

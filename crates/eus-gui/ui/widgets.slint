@@ -1,0 +1,419 @@
+// Eduka-Update-System widgets: flat with a soft depth cue (0.16 launcher look).
+
+export global Theme {
+    out property <color> text: #1F2933;
+    out property <color> muted: #6B7280;
+    out property <color> brand: #14532D;
+    out property <color> green: #157A55;
+    out property <color> line: #E1E4E2;
+    out property <color> panel: #FFFFFFF0;
+    out property <color> selected: #DCEFE6;
+    out property <color> danger: #B42318;
+    out property <length> font-small: 12px;
+    out property <length> font-normal: 13px;
+    out property <length> font-title: 16px;
+}
+
+// Translations are looked up by key in Rust (en, id, pt, tet).
+export global Tr {
+    pure callback t(string) -> string;
+}
+
+export component Icon inherits Image {
+    in property <string> kind;
+    source: kind == "home" ? @image-url("icons/home.svg")
+        : kind == "updates" ? @image-url("icons/updates.svg")
+        : kind == "major" ? @image-url("icons/major.svg")
+        : kind == "refresh" ? @image-url("icons/refresh.svg")
+        : kind == "health" ? @image-url("icons/health.svg")
+        : kind == "cleaner" ? @image-url("icons/cleaner.svg")
+        : kind == "maintenance" ? @image-url("icons/maintenance.svg")
+        : kind == "kernel" ? @image-url("icons/kernel.svg")
+        : kind == "sources" ? @image-url("icons/sources.svg")
+        : kind == "key" ? @image-url("icons/key.svg")
+        : kind == "add" ? @image-url("icons/add.svg")
+        : kind == "history" ? @image-url("icons/history.svg")
+        : kind == "settings" ? @image-url("icons/settings.svg")
+        : kind == "log" ? @image-url("icons/log.svg")
+        : kind == "restart" ? @image-url("icons/restart.svg")
+        : @image-url("icons/about.svg");
+    image-fit: contain;
+}
+
+export component Badge inherits Rectangle {
+    in property <int> count;
+    visible: count > 0;
+    height: 18px;
+    width: max(18px, label.preferred-width + 10px);
+    border-radius: 9px;
+    background: #C53030;
+    label := Text {
+        text: root.count < 100 ? root.count : "99+";
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+    }
+}
+
+component BaseButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <string> icon;
+    callback clicked;
+    out property <bool> hovered: touch.has-hover;
+    out property <bool> pressed: touch.pressed;
+    in property <color> text-color: Theme.text;
+    in property <int> weight: 400;
+    min-height: 26px;
+    min-width: max(64px, row.preferred-width + 20px);
+    border-radius: 5px;
+    row := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        alignment: center;
+        if root.icon != "": Icon {
+            kind: root.icon;
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? root.text-color : #9CA3AF;
+            font-weight: root.weight;
+            vertical-alignment: center;
+            font-size: Theme.font-normal;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component PrimaryButton inherits BaseButton {
+    text-color: white;
+    weight: 600;
+    border-width: 1px;
+    border-color: root.enabled ? #0F5C3F : #A9BFB6;
+    background: !root.enabled ? #B8CEC5 : root.pressed ? #0E5C41 : root.hovered ? #10684A : @linear-gradient(180deg, #1E8C62 0%, #157A55 100%);
+}
+
+export component SecondaryButton inherits BaseButton {
+    border-width: 1px;
+    border-color: root.enabled ? #C8CECB : #E5E7EB;
+    background: root.pressed ? #E8EDEA : root.hovered ? #FFFFFF : @linear-gradient(180deg, #FFFFFF 0%, #F1F4F2 100%);
+}
+
+export component DangerButton inherits BaseButton {
+    text-color: #B42318;
+    border-width: 1px;
+    border-color: root.enabled ? #F04438 : #F8C7C2;
+    background: root.hovered ? #FFF5F4 : white;
+}
+
+export component LinkButton inherits BaseButton {
+    text-color: #1D4ED8;
+    weight: 600;
+    min-height: 20px;
+    min-width: 0px;
+    background: transparent;
+}
+
+export component Check inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: checked ? #157A55 : #9CA3AF;
+    background: !enabled ? (checked ? #8FBFA9 : #F3F4F6) : checked ? #157A55 : white;
+    Path {
+        visible: root.checked;
+        commands: "M 3 8 L 6.5 11.5 L 13 4.5";
+        stroke: white;
+        stroke-width: 2px;
+        fill: transparent;
+        width: 16px;
+        height: 16px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+    }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+export component CheckLabel inherits HorizontalLayout {
+    in property <string> text;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled;
+    spacing: 7px;
+    alignment: start;
+    box := Check {
+        y: (parent.height - self.height) / 2;
+        checked <=> root.checked;
+        enabled: root.enabled;
+        toggled => {
+            root.toggled();
+        }
+    }
+    Text {
+        text: root.text;
+        color: root.enabled ? Theme.text : #9CA3AF;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        TouchArea {
+            enabled: root.enabled;
+            clicked => {
+                root.checked = !root.checked;
+                root.toggled();
+            }
+        }
+    }
+}
+
+export component Radio inherits HorizontalLayout {
+    in property <string> text;
+    in property <bool> checked;
+    callback clicked;
+    spacing: 7px;
+    alignment: start;
+    Rectangle {
+        width: 16px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.checked ? #157A55 : #9CA3AF;
+        background: white;
+        Rectangle {
+            visible: root.checked;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: #157A55;
+        }
+    }
+    Text {
+        text: root.text;
+        color: Theme.text;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Category in the sidebar; the selected one points into the panel.
+export component SidebarButton inherits Rectangle {
+    in property <string> kind;
+    in property <string> text;
+    in property <bool> selected;
+    in property <int> badge;
+    callback clicked;
+    height: 46px;
+    Rectangle {
+        x: 0;
+        width: parent.width - 11px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: root.selected ? #157A554D : #143C281A;
+        background: root.selected ? @linear-gradient(180deg, #E3F2EA 0%, #CFE7DA 100%)
+            : touch.has-hover ? #FFFFFFF7 : @linear-gradient(180deg, #FFFFFFD9 0%, #F0F5F2D9 100%);
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 8px;
+            spacing: 9px;
+            Icon {
+                kind: root.kind;
+                width: 30px;
+                height: 30px;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: root.text;
+                vertical-alignment: center;
+                font-weight: 600;
+                color: root.selected ? #0F4D33 : Theme.text;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if root.badge > 0: Badge {
+                count: root.badge;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+    if root.selected: Path {
+        x: parent.width - 12px;
+        y: (parent.height - 22px) / 2;
+        width: 12px;
+        height: 22px;
+        viewbox-width: 12;
+        viewbox-height: 22;
+        commands: "M 0 0 L 12 11 L 0 22 Z";
+        fill: #CFE7DA;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Large launcher icon with its label underneath and an optional badge.
+export component Tile inherits Rectangle {
+    in property <string> kind;
+    in property <string> text;
+    in property <int> badge;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 150px;
+    height: 116px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: touch.has-hover && root.enabled ? #157A5529 : transparent;
+    background: touch.pressed && root.enabled ? #157A5521 : touch.has-hover && root.enabled ? #157A5512 : transparent;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 6px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Icon {
+                kind: root.kind;
+                width: 56px;
+                height: 56px;
+                opacity: root.enabled ? 1 : 0.45;
+            }
+        }
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            color: root.enabled ? Theme.text : #9CA3AF;
+            font-size: Theme.font-normal;
+        }
+    }
+    Badge {
+        count: root.badge;
+        x: root.width / 2 + 14px;
+        y: 4px;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Coloured notice above the pages with one action.
+export component Banner inherits Rectangle {
+    in property <string> text;
+    in property <string> action;
+    in property <string> kind;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    background: kind == "restart" ? #FFF7ED : kind == "repo" || kind == "health" ? #FEF2F2
+        : kind == "pause" ? #FEFCE8 : kind == "kernel" ? #F0F9FF : #EEF2FF;
+    border-color: kind == "restart" ? #FED7AA : kind == "repo" || kind == "health" ? #FECACA
+        : kind == "pause" ? #FDE68A : kind == "kernel" ? #BAE6FD : #C7D2FE;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 4px;
+        spacing: 6px;
+        Text {
+            text: root.text;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        LinkButton {
+            text: root.action;
+            enabled: root.enabled;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    background: white;
+    border-width: 1px;
+    border-color: Theme.line;
+    border-radius: 6px;
+}
+
+export component Title inherits Text {
+    font-size: Theme.font-title;
+    font-weight: 700;
+    color: Theme.text;
+    wrap: word-wrap;
+}
+
+export component Muted inherits Text {
+    color: Theme.muted;
+    wrap: word-wrap;
+}
+
+export component Bar inherits Rectangle {
+    in property <int> value;
+    in property <string> label;
+    height: 14px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: #A7C4B5;
+    background: #EEF4F0;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.value, 0, 100) / 100;
+        background: #199B61;
+    }
+    Text {
+        text: root.label != "" ? root.label : root.value + "%";
+        font-size: 10px;
+        color: root.value > 50 ? white : Theme.text;
+    }
+}
+
+// Column header of the simple tables.
+export component HeaderCell inherits Text {
+    color: Theme.muted;
+    font-size: Theme.font-small;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+// Primary or secondary look chosen at run time (message box buttons).
+export component ActionButton inherits BaseButton {
+    in property <bool> primary;
+    text-color: primary ? white : Theme.text;
+    weight: primary ? 600 : 400;
+    border-width: 1px;
+    border-color: primary ? #0F5C3F : #C8CECB;
+    background: primary ? (root.hovered ? #10684A : @linear-gradient(180deg, #1E8C62 0%, #157A55 100%))
+        : (root.hovered ? #FFFFFF : @linear-gradient(180deg, #FFFFFF 0%, #F1F4F2 100%));
+}

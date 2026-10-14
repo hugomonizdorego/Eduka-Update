@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch APT repositories and keys added outside Eduka-Update-System
+
+[Path]
+# Repositories or keys added in a terminal (add-apt-repository, echo > *.list,
+# curl | gpg --dearmor ...) trigger a fresh update scan automatically.
+PathChanged=/etc/apt/sources.list
+PathModified=/etc/apt/sources.list.d
+PathModified=/etc/apt/trusted.gpg.d
+PathModified=/etc/apt/keyrings
+Unit=eus-sources-refresh.service
+
+[Install]
+WantedBy=paths.target

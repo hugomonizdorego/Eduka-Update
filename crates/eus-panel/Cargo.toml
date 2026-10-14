@@ -1,0 +1,20 @@
+[package]
+name = "eus-panel"
+description = "Panel integration of Eduka-Update-System: status file writer and tray indicator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "eus-panel-status"
+path = "src/bin/eus-panel-status.rs"
+
+[[bin]]
+name = "eus-tray-indicator"
+path = "src/bin/eus-tray-indicator.rs"
+
+[dependencies]
+serde_json.workspace = true
+libc.workspace = true
+png = "0.18"
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }

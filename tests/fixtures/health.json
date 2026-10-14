@@ -1,0 +1,10 @@
+{"checked_at": 1791900000, "status": "critical",
+ "findings": [
+  {"id":"dpkg-interrupted","severity":"critical","title":"A package installation was interrupted","detail":"libreoffice-core, libreoffice-writer","fix":"dpkg-configure","page":""},
+  {"id":"damaged-files","severity":"critical","title":"Files of core system packages are damaged","detail":"coreutils","fix":"reinstall-damaged","page":""},
+  {"id":"disk-boot","severity":"warning","title":"Low disk space on /boot","detail":"0.1 GB free of 0.5 GB","fix":"","page":"kernels"},
+  {"id":"kernel-restart","severity":"warning","title":"A newer kernel is installed but not running","detail":"Restart to use 6.12.57+deb13-amd64","fix":"","page":"restart"},
+  {"id":"codename-repos","severity":"info","title":"Debian repositories use a release codename","detail":"Switch them to 'stable' so Edukasaun OS keeps updating continuously: trixie, trixie-security","fix":"continuous-stable","page":""}],
+ "recommendations": [
+  {"id":"install-intel-microcode","severity":"recommend","title":"Install CPU microcode updates","detail":"intel-microcode fixes processor bugs and security issues","fix":"install-intel-microcode","page":""},
+  {"id":"install-timeshift","severity":"recommend","title":"Install Timeshift","detail":"System snapshots let you undo a bad update","fix":"install-timeshift","page":""}]}

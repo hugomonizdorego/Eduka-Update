@@ -1,0 +1,12 @@
+critical	apt	gir1.2-webkit-6.0	2.52.6-1~deb13u1	2.54.0-1~deb13u1	81408	Web content engine library for GTK - GObject introspection data	webkitgtk	security
+critical	apt	gir1.2-javascriptcoregtk-6.0	2.52.6-1~deb13u1	2.54.0-1~deb13u1	53964	JavaScript engine library from WebKitGTK - GObject introspection data	webkitgtk	security
+critical	apt	libwebkitgtk-6.0-4	2.52.6-1~deb13u1	2.54.0-1~deb13u1	25060556	Web content engine library for GTK	webkitgtk	security
+critical	apt	libjavascriptcoregtk-6.0-1	2.52.6-1~deb13u1	2.54.0-1~deb13u1	7864320	JavaScript engine library from WebKitGTK	webkitgtk	security
+critical	apt	libwebkit2gtk-4.1-0	2.52.6-1~deb13u1	2.54.0-1~deb13u1	25270681	Web content engine library for GTK	webkitgtk	security
+critical	apt	libjavascriptcoregtk-4.1-0	2.52.6-1~deb13u1	2.54.0-1~deb13u1	7864320	JavaScript engine library from WebKitGTK	webkitgtk	security
+critical	apt	libpng16-16t64	1.6.48-1+deb13u5	1.6.48-1+deb13u6	283340	PNG library - runtime (version 1.6)	libpng1.6	security
+critical	apt	thunderbird	1:140.16.0esr-1~deb13u1	1:140.17.0esr-1~deb13u1	70254592	Email, RSS and newsgroup client with integrated spam filter	thunderbird	security
+kernel	apt	linux-image-amd64	6.12.48-1	6.12.57-1	1532	Linux for 64-bit PCs (meta-package)	linux-signed-amd64	kernel
+kernel	apt	linux-image-6.12.57+deb13-amd64	-	6.12.57-1	104857600	Linux 6.12 for 64-bit PCs (signed)	linux-signed-amd64	kernel
+normal	apt	tzdata	2025b-4	2025c-0+deb13u1	262144	time zone and daylight-saving time data	tzdata	package
+flatpak	flatpak-user	org.libreoffice.LibreOffice	25.2.1	25.8.0	120000000	LibreOffice — The LibreOffice productivity suite	org.libreoffice.LibreOffice	flatpak
